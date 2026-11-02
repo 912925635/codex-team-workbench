@@ -10,3 +10,4 @@ artifacts/
 *.url
 *.tmp
 .DS_Store
+*.db

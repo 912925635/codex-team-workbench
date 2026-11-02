@@ -2,23 +2,14 @@ import { readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { reviewPublicFiles } from './review-public.mjs';
 // Deterministic uncompressed ZIP, no external archive utility or dependency.
 const root = resolve(import.meta.dirname, '..');
 const check = spawnSync(process.execPath, [join(root, 'scripts/check.mjs')], { stdio: 'inherit', windowsHide: true });
 assert.equal(check.status, 0, 'Package validation failed');
-const names = [];
-for (const folder of ['src', 'ui', 'skills', 'assets', '.codex-plugin', 'LICENSES', 'scripts', 'test', 'docs', 'examples']) {
-  function walk(dir) {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, e.name);
-      assert(!e.isSymbolicLink(), 'Symlinks are not packaged');
-      if (e.isDirectory()) walk(path); else names.push(relative(root, path).replaceAll('\\', '/'));
-    }
-  }
-  walk(join(root, folder));
-}
-names.push('plugin.json', 'mcp.json', '.mcp.json', '.gitignore', 'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md');
-names.sort();
+const review = reviewPublicFiles(root);
+assert.deepEqual(review.findings, [], 'Public package privacy review failed');
+const names = review.files.map(file => file.path).sort();
 function crc32(bytes) {
   let crc = 0xffffffff;
   for (const byte of bytes) {

@@ -80,10 +80,10 @@ server over real stdio. Pass `--data` explicitly and a JSON request via `--reque
 or stdin. This is a tool transport, not a new model process. Never guess a data
 directory or open private Codex session stores to find one.
 
-Native thread enumeration, member-session jumping and native resume are not
-implemented. The lead can use its actually available native messaging/continuation
-tools within user authorization, then report the observed result; the MCP server
-does not obtain those powers by recording them.
+The MCP server does not execute native navigation or continuation itself.
+An explicit panel request is relayed to the actual lead, which must use its
+available supported host tools and persist an exact-target outcome receipt.
+The recorded request alone does not grant those host capabilities.
 
 ## Multilevel sessions, workflows and readable work records
 
@@ -201,7 +201,7 @@ file/API. Sending another conversation a message is not part of this protocol.
    ambiguous history; never invent one. The tool returns nextRead only on success.
    For not_found/ambiguous/blocked, report the saved reason and stop this sync.
    In particular, a zero-turn source must not be replaced with development-task
-   history. A historical member may need an exact public parent activity match before it can be read.
+   history. Old workbench_smoke currently has this unresolved source limitation.
 5. Call the public read tool with the returned nextRead object. Verify the child
    response's thread.id exactly matches nextRead.threadId. Import its selected
    visible messages/status/tool summaries via `team_import_thread_page`, following
@@ -271,9 +271,11 @@ and factual evidence. Only the actual spawning parent conversation can supply th
 and the host actually exposes supported collaboration.followup_task or the
 appropriate send_message for a running agent. Record unknown and false when
 capabilities are unavailable; do not infer resumability from task completion.
-While naturally waiting for this authorized execution, refresh the observation
-at intervals no longer than one minute, and immediately report completion,
-failure or cancellation. If you cannot refresh, stop: the panel expires the
+When native Hook ingestion is enabled, let callbacks drive lifecycle state;
+do not poll models or issue repeated lead sync prompts. Refresh collaboration
+capability only at an explicit action or a natural execution checkpoint.
+Without native Hook ingestion, report actual completion, failure or cancellation
+when collecting the authorized result. If you cannot refresh, stop: the panel expires the
 observation after two minutes and will stop the animation automatically. The
 MCP server cannot poll native tools; this is real lead-relayed observation, not
 a continuously authenticated monitor. Do not spawn agents solely to animate it.
@@ -287,3 +289,21 @@ thread, or report success before the tool result. Record the actual observed
 outcome via team_observe_runtime, retaining evidence and time. If the tools or
 agent are unavailable, report the specific limitation; do not create another
 agent. The input text and exact runtimeRef are supplied by the panel request.
+
+
+## Native state and exact host-action receipts (development 0.5.1)
+
+When team_snapshot reports nativeEvents enabled, native lifecycle state comes from the plugin-owned journal. Do not poll models or overwrite it with a guessed running/completed state. A lifecycle stop ends a turn; task success still needs actual result collection. Expired running evidence remains unconfirmed, not completed.
+
+For a UI navigation/continuation request carrying actionId, nativeId and expectedRevision, use only that exact current board/member target. Navigation uses the supported native host navigation tool. Record succeeded through team_record_host_action only after navigated=true; delivery of ui/message is merely sent, not success or visual certification. Missing capability and real failures must be recorded as failed with their reason.
+
+For continuation, verify the current exact spawning parent UUID and runtime path, and an actual recent collaboration observation. Use supported followup_task or send_message for the same agent, never direct V2 app-server input or a substitute agent. Record the real receipt with the action's exact ID/UUID/revision. If the current chat is not the actual spawning parent, do not pretend continuation succeeded.
+
+Public native parent metadata may establish an exact parent/child chain. A shared session alone must not create a tree edge. Do not overwrite metadata-verified parentage with a caller report. Initial workbench request instructions and reported results remain separate from the bounded visible conversation pages; never call them the full native transcript.
+
+A verified public parent/path permits an explicit check-and-continue request even
+when Hook observations cannot establish resumability. This is not authorization
+to assume the agent exists: first use list_agents in the exact spawning parent.
+If absent (including after the parent runtime was reloaded), record failed with
+the concrete reason and do not create a substitute. Before a succeeded receipt,
+record the fresh exact-parent capability observation after the actual operation.

@@ -12,6 +12,16 @@
       $('node-detail').addEventListener('cancel', () => { this.serial++; this.active = null; });
     }
     close() { this.serial++; this.active = null; $('node-detail').close(); }
+    canRequestContinuation(node) {
+      if (!node.runtimeRef || node.historyOnly || !this.bridge.canMessageLead?.()) return false;
+      const age=Date.now()-Date.parse(node.runtimeObservation?.observedAt ?? '');
+      const fresh=node.runtimeFresh && node.runtimeObservation?.resumeAvailable && age>=-30000 && age<=120000;
+      const board=this.getBoard(), parent=board?.members?.find(m=>m.id===node.parentId && !m.historyOnly);
+      const topology=node.nativeTopology;
+      return Boolean(fresh || (parent?.nativeId && topology?.source==='app-server.thread/read metadata' &&
+        topology.rootThreadId===board.rootSessionId && topology.parentThreadId===parent.nativeId));
+    }
+
     renderMap() {
       const board = this.getBoard(), nodes = board.sessionTree ?? [];
       const tree = el('div', 'map-tree'); tree.setAttribute('role', 'tree'); tree.setAttribute('aria-label', '已登记会话与工作流');
@@ -29,7 +39,7 @@
         const card = button('', () => this.open(node.kind, node.entityId), `member-card browse-card ${entity.role ?? 'workflow'}`);
         card.setAttribute('aria-label', `查看${node.kind === 'workflow' ? '工作流' : '成员'}：${node.label}`);
         const top = el('span', 'member-top'), role = el('span', 'member-role');
-        role.append(el('span', '', node.kind === 'workflow' ? '工作流 / WORKFLOW' : entity.role === 'lead' ? '协调者 / LEAD' : `成员 / LEVEL ${level}`), el('span', 'source', sources[node.source] ?? node.source));
+        role.append(el('span', '', node.kind === 'workflow' ? '工作流 / WORKFLOW' : entity.role === 'lead' ? '协调者 / LEAD' : entity.relation==='session_association' ? '会话关联 / 上级待确认' : `成员 / LEVEL ${level}`), el('span', 'source', sources[node.source] ?? node.source));
         top.append(role, el('span', 'member-name', node.label));
         if (entity.historyOnly) top.append(el('span','member-task',`历史成员 · 原绑定 ${entity.historyBinding?.sessionId ?? '未明确'}`));
         const description = node.kind === 'workflow' ? `${children.length} 个成员 · 显示分组` : entity.runtimeRef ?? entity.nativeId ?? entity.id;
@@ -37,7 +47,8 @@
         top.append(el('span', 'member-task', `记录于 ${time(entity.observedAt)}`));
         const assigned = node.kind === 'member' ? board.tasks.filter(t => t.ownerId === entity.id && t.status !== 'completed') : [];
         if (assigned.length) top.append(el('span', 'member-task', assigned.map(t => `${t.id} · ${t.title}`).join('\n')));
-        const bottom = el('span', 'member-bottom'); bottom.append(el('span', '', `${names[entity.status] ?? entity.status}${entity.stale ? ' · 需重新确认' : ''}`), el('span', '', '查看节点 ›'));
+        const bottom = el('span', 'member-bottom'); bottom.append(el('span', '', entity.runtimeObservation?.source==='native-command-hook' && entity.runtimeStatus
+          ? entity.runtimeStatus.label : `${names[entity.status] ?? entity.status}${entity.stale ? ' · 需重新确认' : ''}`), el('span', '', '查看节点 ›'));
         card.append(top, bottom); head.append(card); wrap.append(head);
         if (children.length && !folded) { const list = el('div', 'tree-children'); list.append(...children.map(n => branch(n, level + (n.kind === 'member' ? 1 : 0)))); wrap.append(list); }
         return wrap;
@@ -78,13 +89,16 @@
       const { node, nodeKind } = page, body = $('node-body'); body.replaceChildren();
       $('node-title').textContent = node.name ?? node.title;
       const fields = [['记录标识', node.id], ['状态来源', `${sources[node.source] ?? node.source} · ${names[node.status] ?? node.status}${node.stale ? ' · 需重新确认' : ''}`], ['最近状态记录', time(node.observedAt)]];
+      if (node.runtimeStatus && node.runtimeObservation?.source==='native-command-hook') fields.push(['生命周期含义', node.runtimeStatus.label]);
       if (nodeKind === 'member') {
-        if (node.runtimeObservation) fields.push(['实际协作状态（主代理转报）', `${node.runtimeObservation.state} · ${time(node.runtimeObservation.observedAt)}${node.runtimeFresh ? '' : ' · 已过期'}\n${node.runtimeObservation.source} · ${node.runtimeObservation.evidence}`]);
+        if (node.runtimeObservation) fields.push([node.runtimeObservation.source==='native-command-hook' ? '原生生命周期（自动接收）' : '实际协作状态（主代理转报）', `${node.runtimeObservation.state} · ${time(node.runtimeObservation.observedAt)}${node.runtimeFresh ? '' : ' · 已过期'}\n${node.runtimeObservation.source} · ${node.runtimeObservation.evidence}`]);
         fields.push([node.relation === 'session_association' ? 'Hook 会话关联（非父子确认）' : '代理上级（登记）', node.parentId ?? '无'], ['运行引用', node.runtimeRef ?? '未登记'], ['原生线程标识', node.nativeId ?? '未提供'], ['续接能力', node.runtimeFresh && node.runtimeObservation?.resumeAvailable ? '已由主代理检查' : '未核验或已过期']);
         if (node.workflowId) fields.push(['所属工作流', node.workflowId]);
         if (node.nativeIdentity) fields.push(['线程标识来源', node.nativeIdentity.source==='public-subagent-activity'
           ? `公开子代理活动中继 · 非服务端认证\n来源线程：${node.nativeIdentity.sourceThreadId}\n活动项：${node.nativeIdentity.activityItemIds.join('、')}`
-          : `${node.nativeIdentity.source} · 代理上报，未通过原生读取核验\n${node.nativeIdentity.evidence}`]);
+          : node.nativeIdentity.source==='native-command-hook'
+            ? `原生生命周期 Hook 输入 · 本地接收\n${node.nativeIdentity.evidence}`
+            : `${node.nativeIdentity.source} · 代理上报，未通过原生读取核验\n${node.nativeIdentity.evidence}`]);
         if (node.identityResolution) fields.push(['最近会话关联', `${node.identityResolution.status} · ${time(node.identityResolution.attemptedAt)}${node.identityResolution.reason ? `\n${node.identityResolution.reason}` : ''}`]);
         else if (node.nativeId) fields.push(['线程标识来源', '历史或手动绑定，未核验']);
         if (node.metrics) {
@@ -94,6 +108,10 @@
         }
       } else fields.push(['工作流所属代理', node.parentMemberId], ['分组证据', node.evidence], ['关系说明', '工作流是显示分组，不替代成员实际代理父子关系。']);
       const grid = el('div', 'detail-grid');
+      for (const action of (page.hostActions ?? []).slice(0, 5)) fields.push([
+        action.kind === 'navigate' ? '原生导航回执' : '原生续接回执',
+        `${({requested:'等待主代理执行',sent:'请求已发送，尚无执行确认',succeeded:action.kind==='navigate'?'宿主已确认导航请求':'主代理已确认续接回执',failed:'执行失败',cancelled:'已取消等待（未停止宿主操作）'})[action.status] ?? action.status}\n${action.result ?? ''}\n${action.nativeId}`
+      ]);
       for (const [label, value] of fields) { const cell = el('div'); cell.append(el('span', 'detail-field', label), el('p', 'muted', value)); grid.append(cell); }
       if (node.historyOnly) body.append(el('p','notice',`历史会话成员 · 原绑定：${node.historyBinding?.sessionId ?? '未明确'}。记录保留，不参与当前绑定的同步。`));
       const visibleCount=(page.latestHostPage?.turns ?? []).flatMap(t=>t.items ?? []).filter(i=>i.type==='userMessage'||i.type==='agentMessage').length;
@@ -105,6 +123,14 @@
       const actions = el('div', 'browse-reader-actions');
       const read = button(page.latestHostPage ? '查看已同步对话' : '查看已保存记录', () => (this.latestConversation ?? this.entries).scrollIntoView?.({ block: 'start' }));
       const refresh = button('刷新记录', () => this.load(false)); actions.append(read, refresh); body.append(actions);
+      for (const action of (page.hostActions ?? []).filter(a=>['requested','sent'].includes(a.status))) {
+        const cancel=button('取消等待（不停止代理）',async()=>{
+          cancel.disabled=true;
+          try {await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:action.nativeId,status:'cancelled',source:'ui/message',confirmed:true,result:'用户取消工作台等待；未停止宿主操作或代理，宿主仍可能继续执行。'});await this.load(false);}
+          catch(e){body.append(el('p','error',String(e?.message || '取消等待失败')));cancel.disabled=false;}
+        });
+        cancel.title='只结束这个工作台请求的等待，不中断、撤回或停止宿主操作。';actions.append(cancel);
+      }
       if (nodeKind === 'member') {
         const plan = page.historySync ?? {mode:'unavailable'};
         if (plan.mode==='unavailable' && plan.reason) body.append(el('small','',plan.reason));
@@ -120,8 +146,8 @@
           const refreshRuntime=button('更新运行状态',()=>this.requestRuntimeRefresh(page));
           refreshRuntime.disabled=!node.runtimeRef || node.historyOnly || !this.bridge.canMessageLead?.();actions.append(refreshRuntime);
           const resume=button('续接代理',()=>this.resumeForm(page));
-          resume.disabled=!node.runtimeRef || node.historyOnly || !node.runtimeFresh || !node.runtimeObservation?.resumeAvailable || !this.bridge.canMessageLead?.();
-          resume.title='需要主代理近期确认该代理仍存在且支持协作续接。';actions.append(resume);
+          resume.disabled=!this.canRequestContinuation(node);
+          resume.title='发送给准确父会话；执行前检查原代理是否仍存在及支持续接，不创建替代代理。';actions.append(resume);
         }
         if (page.latestHostPage?.nextCursor) { const older = button('请求更早一页', () => this.requestHostPage(page, true)); older.disabled = sync.disabled; actions.append(older); }
         body.append(el('small', '', plan.mode==='resolve-and-read'
@@ -144,7 +170,8 @@
         const section = el('details', 'activity browse-execution');
         section.append(el('summary', '', `${run.taskId} · ${this.runNames[run.status]} · ${time(run.createdAt)}`), el('p', 'muted', `${run.id}\n运行引用：${run.runtimeRef ?? '未登记'}`));
         if (run.originBinding) section.append(el('p','notice',`历史执行原来源：${run.originBinding.sessionId}`));
-        if (run.result) section.append(el('p', 'browse-result', run.result));
+        if (run.instructions) section.append(el('h4','','初始分派指令（请求时保存）'), el('p','browse-result',run.instructions));
+        if (run.result) section.append(el('h4','','回传结果（执行回执，非完整转录）'), el('p', 'browse-result', run.result));
         if (run.artifacts?.length) section.append(el('p', 'muted', `产物：${run.artifacts.join('、')}`));
         for (const e of run.evidence) section.append(el('p', 'muted', `${e.kind} · ${time(e.at)}\n${e.detail}`));
         section.append(button('查看任务与执行历史', () => { this.close(); this.openTask(run.taskId, run.id); })); body.append(section);
@@ -191,28 +218,42 @@
       form.append(input,submit);body.append(form);
       form.onsubmit=async e=>{
         e.preventDefault();const text=input.value?.trim();if(!text||this.sending)return;
+        if(!this.bridge.canMessageLead?.()){body.append(el('p','error','当前宿主未提供向主会话发送请求的能力。'));return;}
         const selection=this.active,node=page.node, current=this.getBoard()?.members?.find(m=>m.id===node.id) ?? node;
-        const age=Date.now()-Date.parse(current.runtimeObservation?.observedAt ?? '');
-        if(current.historyOnly || current.runtimeRef!==node.runtimeRef || !current.runtimeObservation?.resumeAvailable || !Number.isFinite(age) || age>120000 || age < -30000) {body.append(el('p','error','续接条件已过期或发生变化，请先更新运行状态。'));return;}
-        this.sending=true;submit.disabled=true;
+        if(current.runtimeRef!==node.runtimeRef || current.nativeId!==node.nativeId || !this.canRequestContinuation(current)) {body.append(el('p','error','目标、父会话或能力信息已变化，请刷新节点后重试。'));return;}
+        this.sending=true;submit.disabled=true;let action;
         try {
-          const request={protocolVersion:1,boardId:page.boardId,memberId:node.id,runtimeRef:node.runtimeRef,instructions:text};
-          await this.bridge.messageLead(`Resume this exact Team Workbench agent only because the user explicitly submitted this request. Refresh the board, establish that this is the actual spawning parent conversation with the exact recorded parent UUID, verify member runtimeRef and parent, check collaboration.list_agents for the exact agent and supported collaboration.followup_task or send_message. Send only to that exact agent through the supported native collaboration tool; never use direct app-server input, infer another ID, or spawn a substitute. Record actual observation and outcome using team_observe_runtime; if unavailable, say why and do not report success. Request: ${JSON.stringify(request)}`);
+          const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:node.id,kind:'resume',instructions:text});
+          action=receipt.action;
+          const request={protocolVersion:2,boardId:page.boardId,memberId:node.id,nativeId:current.nativeId,runtimeRef:node.runtimeRef,parentThreadId:receipt.action.parentThreadId,instructions:text,actionId:receipt.action.id,expectedRevision:receipt.action.revision};
+          await this.bridge.messageLead(`Resume this exact Team Workbench agent only because the user explicitly submitted this request. Refresh the board, establish that this is the actual spawning parent conversation with the exact recorded parent UUID, verify member runtimeRef and parent, check collaboration.list_agents for the exact agent and supported collaboration.followup_task or send_message. Send only to that exact agent through the supported native collaboration tool; never use direct app-server input, infer another ID, or spawn a substitute. Before executing, record a fresh exact-parent collaboration capability observation using team_observe_runtime. After executing, refresh that actual observation again; then record the actual result with team_record_host_action for this exact actionId/nativeId/revision: succeeded requires confirmed=true and an actual supported collaboration receipt, not message delivery; otherwise record failed and the exact reason. Request: ${JSON.stringify(request)}`);
           if(this.active===selection && $('node-detail').open)body.append(el('p','muted','已请求主代理续接；请等待实际执行回执。'));
-        }catch(err){if(this.active===selection)body.append(el('p','error',err.message));}
+        }catch(err){
+          const message=String(err?.message || '宿主续接请求发送失败');
+          if(action)try{await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:current.nativeId,status:'failed',source:'ui/message',result:message.slice(0,2000)});}catch{}
+          if(this.active===selection)body.append(el('p','error',message));
+        }
         finally{this.sending=false;submit.disabled=false;}
       };
     }
     async requestNativeNavigation(page) {
       if (this.sending || !this.active) return;
+      if(!this.bridge.canMessageLead?.()){$('node-body').append(el('p','error','当前宿主未提供向主会话发送导航请求的能力。'));return;}
       const plan=page.historySync, selection=this.active;
       if (plan?.mode!=='read' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(plan.threadId ?? '')) return;
       this.sending=true;
+      let action;
       try {
-        const request={protocolVersion:1,boardId:page.boardId,memberId:page.node.id,threadId:plan.threadId};
-        await this.bridge.messageLead(`Open the explicitly selected Team Workbench child conversation. The user clicked the open button. Check that this exact UUID is still bound to this member. If available, call codex-app-tools.navigate_to_codex_page once with the exact threadId. Do not guess another ID, send a message to the child, or create/resume an agent. If the navigation tool or child route is unavailable, report the exact limitation. The request being sent is not proof the conversation opened. Request: ${JSON.stringify(request)}`);
+        const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:page.node.id,kind:'navigate'});
+        action=receipt.action;
+        const request={protocolVersion:2,boardId:page.boardId,memberId:page.node.id,threadId:plan.threadId,nativeId:plan.threadId,actionId:receipt.action.id,expectedRevision:receipt.action.revision};
+        await this.bridge.messageLead(`Open the explicitly selected Team Workbench child conversation. The user clicked the open button. Check that this exact UUID is still bound to this member. If available, call codex-app-tools.navigate_to_codex_page once with the exact threadId. Do not guess another ID, send a message to the child, or create/resume an agent. Then record the actual outcome with team_record_host_action for this exact actionId/nativeId/revision. Use succeeded with confirmed=true only if the host returned navigated=true; if unavailable or rejected, record failed with the reason. The source is codex-app-tools.navigate_to_codex_page. Message delivery alone is not success; a navigation acknowledgment is not proof of visual UI verification. Request: ${JSON.stringify(request)}`);
         if(this.active===selection && $('node-detail').open)$('node-body').append(el('p','muted','已请求主会话打开对应子代理；请等待宿主导航结果。'));
-      } catch(e) {if(this.active===selection)$('node-body').append(el('p','error',e.message));}
+      } catch(e) {
+        const message=String(e?.message || '宿主导航请求发送失败');
+        if(action)try{await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:plan.threadId,status:'failed',source:'ui/message',result:message.slice(0,2000)});}catch{}
+        if(this.active===selection)$('node-body').append(el('p','error',message));
+      }
       finally {this.sending=false;}
     }
     async requestHostPage(page, older) {

@@ -39,9 +39,9 @@ test('another parent source is rejected without changing the child binding',t=>{
   assert.throws(()=>f.call('team_report_member',{memberId:'lead',name:'Wrong fixture origin',status:'unknown',nativeId:'00000000-0000-4000-8000-000000000099',evidence:'Another task cannot silently become this parent'}),{code:'IDENTITY_CONFLICT'});
   assert.deepEqual(f.store.read(f.board.id),before);
 });
-test('development child activity cannot replace fixture_legacy; zero activity is a visible terminal read result',t=>{
-  const f=fixture(t,{path:'/root/fixture_legacy'});
-  let result=f.bind({activities:[f.activity('dev',childId,'/root/fixture_other')]});
+test('development child activity cannot replace workbench_smoke; zero activity is a visible terminal read result',t=>{
+  const f=fixture(t,{path:'/root/workbench_smoke'});
+  let result=f.bind({activities:[f.activity('dev',childId,'/root/native_execution_test')]});
   assert.equal(result.resolution.code,'ACTIVITY_NOT_FOUND');assert.equal(result.nextRead,null);
   assert.equal(result.board.members.find(m=>m.id==='child').nativeId,null);
   result=f.bind({activities:[]});assert.equal(result.resolution.status,'not_found');
@@ -71,7 +71,7 @@ test('a historical short-parent record is revalidated only by exact activity fro
   f.store.transact(f.board.id,b=>{const m=b.members.find(m=>m.id==='child');m.historyOnly=true;m.historyBinding={sessionId:'00000000',parentThreadId:'00000000',generation:0};});
   assert.equal(f.call('team_read_records',{nodeKind:'member',nodeId:'child'}).historySync.historicalRevalidation,true);
   const absent=f.bind({activities:[]});assert.equal(absent.resolution.status,'not_found');assert.equal(absent.board.members.find(m=>m.id==='child').historyOnly,true);
-  assert.throws(()=>f.bind({sourceThreadId:'99999999-0000-4000-8000-000000000011'}),{code:'SOURCE_THREAD_MISMATCH'});
+  assert.throws(()=>f.bind({sourceThreadId:'00000000-0000-4000-8000-000000009004'}),{code:'SOURCE_THREAD_MISMATCH'});
   const result=f.bind();const child=result.board.members.find(m=>m.id==='child');
   assert.equal(child.nativeId,childId);assert.equal(child.historyOnly,false);assert.equal(child.historyBinding.parentThreadId,'00000000');assert.equal(child.historyBinding.revalidatedParentThreadId,parentId);
 });
@@ -80,11 +80,25 @@ test('a historical short-parent record is revalidated only by exact activity fro
 test('actual native observations require exact path, monotonic time and freshness, with terminal states stopping running',t=>{
   const f=fixture(t),now=new Date(),observe=extra=>f.call('team_observe_runtime',{memberId:'child',runtimeRef:f.path,sourceThreadId:parentId,expectedRevision:f.store.read(f.board.id).revision,state:'running',source:'collaboration.list_agents',resumeAvailable:true,observedAt:now.toISOString(),evidence:'Synthetic actual host observation',...extra});
   assert.throws(()=>observe({runtimeRef:'/root/other'}),{code:'RUNTIME_MISMATCH'});
-  assert.throws(()=>observe({sourceThreadId:'99999999-0000-4000-8000-000000000011'}),{code:'SOURCE_THREAD_MISMATCH'});
+  assert.throws(()=>observe({sourceThreadId:'00000000-0000-4000-8000-000000009004'}),{code:'SOURCE_THREAD_MISMATCH'});
   assert.throws(()=>observe({state:'unknown',resumeAvailable:true}),{code:'INVALID_ARGUMENT'});
   let b=observe({}).board;assert.equal(b.members.find(m=>m.id==='child').runtimeFresh,true);
   assert.throws(()=>observe({observedAt:new Date(now.getTime()-1000).toISOString()}),{code:'STALE_OBSERVATION'});
   b=observe({state:'completed',observedAt:new Date(now.getTime()+1).toISOString()}).board;assert.equal(b.members.find(m=>m.id==='child').runtimeObservation.state,'completed');
   f.store.transact(f.board.id,board=>{board.members.find(m=>m.id==='child').runtimeObservation.observedAt=new Date(Date.now()-121000).toISOString();});
   assert.equal(f.store.view(f.board.id).members.find(m=>m.id==='child').runtimeFresh,false);
+});
+
+
+test('exact public UUID binding consolidates auto-discovered and execution members without losing records',t=>{
+ const f=fixture(t),duplicate='native:'+childId;
+ f.store.transact(f.board.id,b=>b.members.push({id:duplicate,name:'Observed native',role:'member',source:'hook',status:'start_observed',parentId:'lead',relation:'session_association',nativeId:childId,runtimeRef:f.path,observedAt:new Date().toISOString(),runtimeObservation:{state:'running',source:'native-command-hook',observedAt:new Date().toISOString()}}));
+ f.call('team_append_record',{nodeKind:'member',nodeId:duplicate,recordId:'before-merge',role:'note',text:'IMMUTABLE_FIXTURE_RECORD',evidence:'Fixture'});
+ f.call('team_create_task',{title:'Fixture owner preservation'});f.call('team_update_task',{taskId:'task-1',expectedRevision:1,actorId:duplicate,action:'claim'});
+ const before=f.store.db.prepare('SELECT payload,digest FROM work_records').get();
+ const result=f.bind({});assert.equal(result.board.members.filter(m=>m.nativeId===childId).length,1);assert.equal(result.board.memberAliases[duplicate],'child');assert.equal(result.board.tasks[0].ownerId,'child');
+ assert.equal(result.board.members.find(m=>m.id==='child').runtimeObservation.source,'native-command-hook');
+ assert.deepEqual(f.store.db.prepare('SELECT payload,digest FROM work_records').get(),before);
+ const page=f.call('team_read_records',{nodeKind:'member',nodeId:duplicate});assert.equal(page.node.id,'child');assert.equal(page.records[0].text,'IMMUTABLE_FIXTURE_RECORD');
+ assert.throws(()=>f.call('team_report_member',{memberId:duplicate,name:'Duplicate',status:'unknown'}),{code:'MEMBER_MERGED'});
 });

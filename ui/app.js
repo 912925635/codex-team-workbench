@@ -16,6 +16,15 @@
   function showError(error) { $('error').hidden = false; $('error').textContent = error.message; }
   function clearError() { $('error').hidden = true; }
   function apply(result) {
+    if (result.nativeEvents) {
+      state.nativeEvents = result.nativeEvents;
+      if (result.nativeEvents.enabled) $('notice').textContent = ({
+        'connected-to-local-hook-journal': '原生生命周期已接入：自动接收开始和停止事件；停止不等于任务成功，续接能力需另行确认。',
+        'waiting-for-callback': '正在等待指定会话的原生子代理回调。',
+        'error-reading-local-hook-journal': '原生事件读取失败；保留已保存记录。',
+        'unbound-or-archived': '请先关联当前原生会话，再接收生命周期事件。'
+      })[result.nativeEvents.state] ?? '原生生命周期状态待确认。';
+    }
     state.boards = result.boards ?? state.boards;
     state.archivedBoards = result.archivedBoards ?? state.archivedBoards;
     state.board = result.board ?? null;
@@ -287,12 +296,19 @@
   for (const id of ['close-editor', 'cancel-editor']) $(id).onclick = () => $('editor').close();
   $('close-detail').onclick = () => { state.activeTask = null; $('task-detail').close(); };
   // Stop background reads while editing. Revisions protect concurrent writers.
-  const poll = setInterval(() => { if (!document.hidden && !$('editor').open && !$('task-detail').open && !$('node-detail').open) void refresh(); }, 5000);
+  let nextRefresh = 0;
+  const poll = setInterval(() => {
+    const editing = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+    if (document.hidden || $('editor').open || $('task-detail').open || editing || browser.sending || Date.now() < nextRefresh) return;
+    if ($('node-detail').open && !state.nativeEvents?.enabled) return;
+    nextRefresh = Date.now() + (state.nativeEvents?.enabled ? 1000 : 5000);
+    void refresh();
+  }, 1000);
   window.addEventListener('pagehide', () => clearInterval(poll), { once: true });
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.4.6 · 未连接宿主' : '插件协议已连接 · 0.4.6';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.1 · 未连接宿主' : '插件协议已连接 · 0.5.1';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

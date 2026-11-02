@@ -2,6 +2,9 @@ import { validate, BoardError } from './validation.mjs';
 import { requestExecution, recordExecution } from './execution.mjs';
 import { recordWorkflow, appendRecord, readRecords, importThreadPage } from './browse.mjs';
 import { bindAgentActivity } from './history-sync.mjs';
+import { syncNativeEvents } from './native-events.mjs';
+import { syncNativeTopology } from './native-topology.mjs';
+import { requestHostAction, recordHostAction } from './host-actions.mjs';
 const str = (maxLength = 200) => ({ type: 'string', minLength: 1, maxLength });
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const ids = { type: 'array', items: str(), maxItems: 100 };
@@ -11,12 +14,14 @@ const identityFields = { runtimeRef: str(300), nativeId: str(), hostId:str(), sp
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 // Version the view independently of any host-cached old tool/resource metadata.
-export const UI_URI = 'ui://team-workbench/panel/0.4.6';
+export const UI_URI = 'ui://team-workbench/panel/0.5.1';
 export const LEGACY_UI_URI = 'ui://team-workbench/panel';
 export const tools = [
   { name: 'team_panel', title: '团队工作台', description: 'Open the persistent shared task board and team map. With boardId, remember that selection if the host supplies anonymous session metadata; {} reopens it. This correlation is not a native Codex thread ID. Does not discover or control agents.',
     inputSchema: obj({ boardId: str() }), annotations: write,
     _meta: { ui: { resourceUri: UI_URI }, 'openai/ui': { entrypoints: [{ type: 'thread' }] } } },
+  {name:'team_request_host_action',description:'Record a user-requested exact-target navigation or supported continuation. Does not execute the host operation. A message acknowledgment is not success.',inputSchema:obj({boardId:str(),memberId:str(),kind:{type:'string',enum:['navigate','resume']},instructions:str(16384)},['boardId','memberId','kind']),annotations:write},
+  {name:'team_record_host_action',description:'Record the actual supported host result for one exact pending action. Success requires a positive host receipt; ui/message delivery alone cannot succeed. User-confirmed cancelled only closes the workbench wait and never stops a native operation. Remains labeled lead-relayed.',inputSchema:obj({boardId:str(),actionId:str(),expectedRevision:revision,nativeId:str(),status:{type:'string',enum:['sent','succeeded','failed','cancelled']},source:{type:'string',enum:['codex-app-tools.navigate_to_codex_page','collaboration.followup_task','collaboration.send_message','ui/message']},confirmed:{type:'boolean'},result:str(2000)},['boardId','actionId','expectedRevision','nativeId','status','source','result']),annotations:write},
   { name: 'team_snapshot', description: 'List boards or read one board, including task revisions and source-labeled member observations. No native agent discovery.',
     inputSchema: obj({ boardId: str() }), annotations: readOnly },
   { name: 'team_create_board', description: 'Create an empty local team board. Does not create any agent or thread.',
@@ -73,11 +78,21 @@ export function dispatch(store, name, args = {}, context = {}) {
   validate(tool.inputSchema, args);
   let board;
   switch (name) {
+    case 'team_request_host_action': return requestHostAction(store,args);
+    case 'team_record_host_action': return recordHostAction(store,args);
     case 'team_panel': case 'team_snapshot': {
       const boardId = args.boardId ?? store.selectedBoard(context.anonymousSession);
       if (name === 'team_panel' && args.boardId) store.selectBoard(context.anonymousSession, args.boardId);
+      let nativeEvents = { enabled: false, state: 'disabled', applied: 0 };
+      if (boardId) {
+        try { nativeEvents = syncNativeEvents(store, boardId); }
+        catch { nativeEvents = { enabled: !!store.nativeEventJournal, state: 'error-reading-local-hook-journal', applied: 0 }; }
+      }
+      const nativeTopology = boardId ? syncNativeTopology(store, boardId) : { state: 'unbound' };
       const selected = boardId ? store.view(boardId) : null;
       return { boards: store.list(), archivedBoards: store.list({includeArchived:true}).filter(b=>b.archivedAt), board: selected?.archivedAt ? null : selected,
+        nativeEvents,
+        nativeTopology,
         conversationAssociation: store.sessionHash(context.anonymousSession) ? 'anonymous-host-session' : 'not-provided' };
     }
     case 'team_create_board': board = store.view(store.create(args.title)); break;

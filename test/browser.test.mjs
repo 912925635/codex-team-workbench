@@ -29,7 +29,7 @@ function fixture(call) {
     { id:'grouped',name:'Fixture grouped',parentId:'child',workflowId:'workflow',source:'reported',status:'idle' }],
     workflows:[{id:'workflow',title:'Fixture workflow',parentMemberId:'child',status:'running',source:'reported'}] };
   board.sessionTree = sessionTree(board);
-  const bridge={ async call(name,args) {const page=await call(name,args);if(page?.nodeKind==='member')page.historySync??=historySyncPlan(board,page.node,page.latestHostPage);return page;} };
+  const bridge={ async call(name,args) {if(name==='team_request_host_action')return {action:{id:'host-fixture',revision:1}};const page=await call(name,args);if(page?.nodeKind==='member')page.historySync??=historySyncPlan(board,page.node,page.latestHostPage);return page;} };
   const browser = new context.WorkbenchBrowser({ bridge,getBoard:()=>board,openTask:()=>{},runNames:{succeeded:'Confirmed fixture'} });
   return { ids, board, browser };
 }
@@ -130,4 +130,58 @@ test('sync failure keeps an earlier successful snapshot visible with its failure
   const f=fixture(async()=>({boardId:f.board.id,node:f.board.members[1],nodeKind:'member',records:[],nextCursor:null,executions:[],executionCount:0,latestHostPage:page}));
   f.board.members[1].nativeId=page.threadId;f.board.members[1].identityResolution={status:'blocked',reason:'Fixture host unavailable',attemptedAt:'2026-11-02T00:01:00Z'};
   await f.browser.open('member','child');assert(f.ids['node-body'].textContent.includes('Fixture host unavailable'));assert(f.ids['node-body'].textContent.includes('Saved actual page fixture'));assert(f.ids['node-body'].textContent.includes('已同步 1 条可见消息'));
+});
+
+
+test('expired native running observation stays explicitly unconfirmed, not completed or idle',()=>{
+ const f=fixture(async()=>({}));const m=f.board.members[1];m.source='hook';m.status='start_observed';m.runtimeFresh=false;m.runtimeObservation={source:'native-command-hook',state:'running'};m.runtimeStatus={label:'运行后未收到停止 · 当前活跃性待确认'};
+ f.browser.renderMap();assert(f.ids['team-map'].textContent.includes('当前活跃性待确认'));
+ const branch=walk(f.ids['team-map']).find(e=>e.className?.includes('runtime-active'));assert.equal(branch,undefined);
+});
+
+test('node shows original dispatch instructions, source-labeled result and actual host failure receipt',async()=>{
+ const f=fixture(async()=>({node:f.board.members[1],nodeKind:'member',records:[],nextCursor:null,executionCount:1,
+ executions:[{id:'run-fixture',taskId:'task-fixture',status:'succeeded',createdAt:'2026-01-01T00:00:00Z',instructions:'ORIGINAL_DISPATCH_TEXT',result:'REPORTED_RESULT_TEXT',evidence:[]}],
+ hostActions:[{kind:'navigate',status:'failed',result:'HOST_ROUTE_UNAVAILABLE_FIXTURE',nativeId:'fixture-id'}]}));
+ await f.browser.open('member','child');const text=f.ids['node-body'].textContent;
+ for(const expected of ['ORIGINAL_DISPATCH_TEXT','REPORTED_RESULT_TEXT','HOST_ROUTE_UNAVAILABLE_FIXTURE','非完整转录'])assert(text.includes(expected));
+});
+
+
+test('unsupported host messaging prevents navigation requests and leaves no pending action',async()=>{
+ let created=0;const f=fixture(async()=>({node:f.board.members[1],nodeKind:'member',records:[],nextCursor:null,executions:[],executionCount:0}));
+ f.board.members[1].nativeId='00000000-0000-4000-8000-000000000602';await f.browser.open('member','child');
+ f.browser.bridge.canMessageLead=()=>false;const original=f.browser.bridge.call;f.browser.bridge.call=async(name,args)=>{if(name==='team_request_host_action')created++;return original(name,args);};
+ await f.browser.requestNativeNavigation({boardId:f.board.id,node:f.board.members[1],historySync:{mode:'read',threadId:f.board.members[1].nativeId}});
+ assert.equal(created,0);assert(f.ids['node-body'].textContent.includes('未提供'));
+});
+
+test('host message failure records failed exact-target receipt instead of a permanent pending request',async()=>{
+ const calls=[];const f=fixture(async(name,args)=>{if(name==='team_record_host_action'){calls.push(args);return{};}return{boardId:'fixture-board',node:f.board.members[1],nodeKind:'member',records:[],nextCursor:null,executions:[],executionCount:0};});
+ const id='00000000-0000-4000-8000-000000000603';f.board.members[1].nativeId=id;f.browser.bridge.canMessageLead=()=>true;f.browser.bridge.messageLead=async()=>{throw new Error('FIXTURE_DELIVERY_FAILED');};
+ await f.browser.open('member','child');await f.browser.requestNativeNavigation({boardId:f.board.id,node:f.board.members[1],historySync:{mode:'read',threadId:id}});
+ assert.equal(calls.length,1);assert.equal(calls[0].status,'failed');assert.equal(calls[0].nativeId,id);assert.equal(calls[0].source,'ui/message');
+ assert(f.ids['node-body'].textContent.includes('FIXTURE_DELIVERY_FAILED'));
+});
+
+
+test('auto-discovered exact-parent member can request verification without pretending resume capability',async()=>{
+  const f=fixture(async()=>({boardId:f.board.id,node:f.board.members[1],nodeKind:'member',records:[],nextCursor:null,executions:[],executionCount:0}));
+  const root='00000000-0000-4000-8000-000000000701', child='00000000-0000-4000-8000-000000000702';
+  f.board.rootSessionId=root;f.board.members[0].nativeId=root;
+  const node=f.board.members[1];node.nativeId=child;node.source='hook';node.runtimeFresh=true;
+  node.nativeTopology={source:'app-server.thread/read metadata',rootThreadId:root,parentThreadId:root};
+  node.runtimeObservation={state:'idle',resumeAvailable:false,source:'native-command-hook',observedAt:new Date().toISOString()};
+  let calls=0,prompt;const original=f.browser.bridge.call;
+  f.browser.bridge.call=async(name,args)=>{if(name==='team_request_host_action'){calls++;return {action:{id:'host-fixture',revision:1,parentThreadId:root}};}return original(name,args);};
+  f.browser.bridge.canMessageLead=()=>true;f.browser.bridge.messageLead=async p=>{prompt=p;};
+  await f.browser.open('member','child');
+  const resume=walk(f.ids['node-body']).find(e=>e.textContent==='续接代理');assert.equal(resume.disabled,false);assert.equal(calls,0);
+  resume.onclick();const form=walk(f.ids['node-body']).find(e=>e.tagName==='form');walk(form).find(e=>e.tagName==='textarea').value='Verify the same actual agent first';
+  await form.onsubmit({preventDefault(){}});assert.equal(calls,1);
+  const request=JSON.parse(prompt.split('Request: ')[1]);assert.equal(request.nativeId,child);assert.equal(request.parentThreadId,root);
+  assert(prompt.includes('Before executing, record a fresh exact-parent'));assert(prompt.includes('never use direct app-server input'));
+  assert.equal(node.runtimeObservation.resumeAvailable,false);
+  f.board.members[0].nativeId='00000000-0000-4000-8000-000000000703';
+  assert.equal(f.browser.canRequestContinuation(node),false);
 });

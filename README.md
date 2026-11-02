@@ -1,83 +1,99 @@
-# Codex Team Workbench / 团队工作台
+# Team Workbench / 团队工作台
 
-A local MCP plugin for persistent tasks, recorded agent relationships and readable
-work records in compatible ChatGPT/Codex hosts. Version **0.4.6**.
+A local MCP workbench for native Codex collaborators, inspired by DeepSeek Harness.
+Tasks, lifecycle observations, exact parent relationships and source-labeled records
+share one conversation panel.
 
-这是一个独立的本地插件：共享任务、依赖、成员树、工作流分组和已同步记录放在同一面板。
-它不是 OpenAI 或 DeepSeek 官方产品，也没有完成所有桌面宿主的端到端验收。
+**0.5.1 是开发快照。真实原生事件与续接链路已实测；从 GitHub 安装后的完整桌面
+UI 验收尚未完成。** 原稳定源码仍可追溯至提交
+[`3a66a9a`](https://github.com/912925635/codex-team-workbench/commit/3a66a9accb0a8ae9fb6dc54fefad1b45d5424d29)。
 
-## Features
+## 已实现与实测
 
-- SQLite-backed tasks, owners and dependency checks with optimistic revisions.
-- Expandable recorded parent/child relationships and workflow groups.
-- Bounded visible conversation snapshots relayed by the lead through public host tools.
-- Source-labeled runtime observations; only fresh observed running states animate.
-- Lead-mediated navigation and continuation requests when host capabilities exist.
-- Explicit binding-change confirmation with old-history isolation.
-- Reversible board archive and restore; archiving does not delete project files.
-- Refresh feedback for pending, changed, unchanged and failed reads.
+- SQLite 持久化任务、负责人、DAG 依赖、原子领取与版本冲突检查。
+- 原生 `SubagentStart`、`SubagentStop`、`PreModelRequest` 回调写入插件自己的元数据
+  journal；普通 MCP 快照自动读取，无需反复发同步指令，不使用模型轮询状态。
+- 真实同一子代理的「运行→空闲→续接运行→空闲」已验证；续接运行由
+  `PreModelRequest` 捕获。回合停止与任务成功分开记录。
+- 真实父子孙关系经公开线程父节点元数据核对；树形节点与工作流分组分别保留含义。
+  只有同一会话关联时，不虚构父子关系。
+- 原生计时进程实际运行 135.169 秒。运行证据超过两分钟时保留「运行后未收到停止、
+  活跃性待确认」，真实停止回调到达后才转为空闲。
+- 初始指令、执行结果与可见会话快照分开保存。快照是有来源、有边界的可见历史，
+  不冒充完整工具或推理转录。
+- 打开/续接请求绑定准确成员 UUID、父会话和运行路径，由主代理调用宿主支持的工具。
+  消息发出不等于执行成功；旧代理不在目录时不新建替身。
 
-## Requirements and quick start
+最近完整回归为 92 项通过；GitHub 目录结构也有独立检查。真实验证摘要见
+[验收记录](docs/ACCEPTANCE_0.5.1.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
+公开仓库仅含合成测试数据，不含真实会话标识、转录、任务数据库或测试回执。
 
-Use an existing **Node.js 24+** installation with `node:sqlite`. No third-party npm
-runtime dependencies or API keys are required for local preview and tests.
+## 从 GitHub 添加
 
-```sh
+标准目录清单位于 `.agents/plugins/marketplace.json`，`./` 指向仓库根部插件。
+
+官方已核实的工作区同步路径需要**工作区管理员**：
+
+1. 打开 **Admin → Plugins → Add → Import marketplace**。
+2. Source 填 `https://github.com/912925635/codex-team-workbench`；Path 留空；
+   Branch 填 `main`，或固定到一个审核过的完整 commit。
+3. 导入后按工作区策略安装 Team Workbench，并正常审阅三项元数据 Hooks。
+
+这是工作区 GitHub 来源导入，不是单纯连接 GitHub 应用。个人账号若没有该管理入口，
+这里不假设存在同名按钮；使用客户端实际提供的原生安装入口。
+[官方 GitHub 导入说明](https://learn.chatgpt.com/docs/enterprise/plugin-management)
+说明了管理员要求、仓库根路径和同步方式。
+
+已有私有插件与新 GitHub 来源**可能是不同身份**，数据目录也可能不同。不要先卸载旧版，
+不要删除旧数据库再重装；先确认身份、备份原数据并核对新实例的数据根。
+仓库不嵌入任何人的私有插件 ID，也不自动把个人插件迁移到工作区。
+详见 [安装、保留数据与移除](docs/INSTALL.md)。
+
+## Hooks 与权限
+
+源码声明三项待审阅的插件 Hooks。发布或克隆仓库不会修改本机 `hooks.json`、信任记录、
+模型设置或现有安装。安装后仍需在 **Settings → Hooks** 或输入框的 **Review hooks**
+中正常审阅；未受信任时不执行。
+
+处理器只持久化明确绑定、未归档工作台对应根会话的事件/代理/回合标识、类型和时间。
+不保存提示词、对话正文、工具载荷、凭据或 Token 数据；不读宿主私有会话目录或数据库。
+启用这个范围需要用户正常批准，单个测试会话的授权不等于所有工作台的授权。
+每次回调使用短时 Node 进程，没有常驻监听器或远程数据上传。
+
+若已有开发探针，先确认插件自身回调正常，再只移除准确匹配的开发定义。
+工作台不要同时读取两份 journal。迁移脚本只生成计划，不自动改配置。
+
+## 本地开发
+
+需要已有 **Node.js 24+**（使用内置 `node:sqlite`）；Windows 公开元数据读取还需要
+已有 PowerShell 7。没有 npm 依赖，不需要 API Key 或另装 Codex CLI。
+
+```powershell
 npm run check
 npm test
 npm run preview
 ```
 
-Open the loopback URL printed by preview. The preview is a standalone local UI,
-not proof that a host has activated a conversation panel or native agent tools.
-It starts empty and saves real local data. Stop it with Ctrl+C.
+预览仅绑定 `127.0.0.1` 动态端口，使用真实本地存储；它不是桌面插件安装或 UI 验收。
+Ctrl+C 只停止该预览。`node src/server.mjs` 提供 stdio MCP。
+可用 `npm run pack:local` 生成源码包；检查、测试和打包脚本不会安装插件、信任 Hooks、
+重启宿主或启动模型。
 
-For stdio MCP, the entrypoint is `node src/server.mjs`, with this directory as cwd.
-It waits for JSON-RPC on stdin. See [installation](docs/INSTALL.md) for packaging,
-data location, updates and removal. Use your target host's native plugin flow;
-do not assume a separately installed Codex CLI manages the running desktop host.
+数据根优先级：`TEAM_WORKBENCH_DATA`，否则 `PLUGIN_DATA/team-workbench`，否则当前
+工作目录下的 `.team-workbench`。升级必须核实实际根目录；相同包名不保证跨来源数据迁移。
 
-```sh
-npm run pack:local
-```
+## 当前边界
 
-This creates `artifacts/team-workbench-local-0.4.6.zip`. The archive contains this
-plugin's code, manifests, tests and licenses, excluding runtime data and private
-artifacts. No package/test script installs a plugin or changes host settings.
+新 GitHub 安装的面板激活、视觉连线、点击跳转和续接按钮的完整客户端验收仍未完成。
+公开导航工具实际返回过成功，但这不等于目视确认界面。当前会话的 MCP 热重载也未核实，
+关闭重开面板不保证替换旧连接。
 
-## What refresh and automation mean
+插件不能凭匿名 metadata 自动取得原生线程 UUID；绑定必须来自明确授权的准确来源。
+代理目录丢失后的历史代理恢复尚未证明可行。续接依赖实际父会话能够访问那个代理及
+受支持的协作工具；不向 V2 子代理直接发送 app-server 输入，不偷偷换成自管团队。
 
-The top refresh calls `team_snapshot` to read saved board data. If a node is open,
-it also calls `team_read_records`. It **does not fetch new native chat messages**.
-It reports success, unchanged data, or failure visibly and suppresses duplicate
-pending requests. Snapshot notices show saved visible-message counts and time.
+## 许可证
 
-Native work is orchestrated by the **actual originating lead conversation**.
-The MCP server cannot invoke the model's internal collaboration tools. The lead
-must have the relevant public host tools and follow the bundled Skill to register
-actual parent IDs, relay exact public activity mappings, observe state and import
-selected visible history. These are lead-relayed observations, not authenticated
-background telemetry. Without new observations, running animation expires after
-two minutes. Navigation and continuation are requests to the lead, not proof that
-a native conversation opened or resumed. Unsupported operations stay unavailable.
-
-No private host session files, conversation databases or hidden host APIs are read.
-Starting another app-server does not attach this plugin to the desktop's live agents.
-Full native transcripts and universal desktop compatibility are not claimed.
-See [interface matrix](docs/INTERFACE_MATRIX.md) and [validation](docs/VALIDATION.md).
-
-## Data and privacy
-
-The data directory is selected in this order: `TEAM_WORKBENCH_DATA`, then
-`PLUGIN_DATA/team-workbench`, otherwise `.team-workbench` under cwd. Share one
-explicit data directory only when intended. Back it up before changing hosts or
-upgrading. It can contain tasks, supplied thread IDs and selected visible messages;
-**do not commit or share it**. The repository and distribution exclude real data.
-User-supplied roles, bindings and host observations are not authentication boundaries.
-
-## License and attribution
-
-[MIT](LICENSE). Task transition/revision semantics are adapted from
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), commit
-`ce7073d51254c26cd63b22a60835b8f948deb447`. Its original MIT notice is retained in
-[LICENSES](LICENSES/DeepSeek-Harness-MIT.txt); see [third-party notices](THIRD_PARTY_NOTICES.md).
+MIT。[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的任务板设计与
+部分语义适配保留 MIT 许可和归属，见 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)
+及 [上游许可证](LICENSES/DeepSeek-Harness-MIT.txt)。

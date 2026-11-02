@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "team-workbench",
-  "version": "0.4.6",
-  "description": "Team workspace with lead-orchestrated execution and reported session browsing.",
+  "version": "0.5.1",
+  "description": "Native team workbench with reviewed lifecycle hooks, task execution and source-labeled session browsing.",
   "author": {
     "name": "Team Workbench contributors"
   },
@@ -18,7 +18,7 @@
       "interface": {
         "displayName": "Team Workbench",
         "shortDescription": "Tasks and team in one place",
-        "longDescription": "Team tasks, multilevel recorded agents, workflow groups and visible conversation pages. The lead reads its authorized parent activities; deterministic MCP code binds exact agent paths to unique thread IDs and returns the child-read request. Host reads are lead-mediated, source-labeled and bounded. Missing tools/history are explicit blockers. No hidden discovery, native navigation or full transcript claim.",
+        "longDescription": "Shared tasks, source-labeled native members, multilevel parent relationships and workflow groups. Reviewed metadata-only hooks update running and idle states. Navigation and continuation require supported host tools and exact-target receipts. Visible history is bounded and lead-mediated. Full GitHub-installed desktop UI acceptance remains unverified.",
         "developerName": "Team Workbench contributors",
         "category": "Productivity",
         "capabilities": [
@@ -29,7 +29,8 @@
         "logo": "./assets/icon.svg",
         "composerIcon": "./assets/icon.svg",
         "defaultPrompt": "Open the Team Workbench for this task."
-      }
+      },
+      "hooks": "./examples/hooks/hooks.json"
     }
   }
 }

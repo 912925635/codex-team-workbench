@@ -7,19 +7,26 @@ import { randomUUID, createHash } from 'node:crypto';
 import { requireValue, text, BoardError } from './validation.mjs';
 import { sessionTree, observation } from './browse.mjs';
 import { isThreadId } from './history-sync.mjs';
+import { runtimeView } from './runtime-view.mjs';
+import { readNativeMetadata } from './native-topology.mjs';
 
 export function dataDirectory() {
-  return resolve(process.env.TEAM_WORKBENCH_DATA ?? (process.env.PLUGIN_DATA
+  return resolve(process.env.TEAM_WORKBENCH_DATA || (process.env.PLUGIN_DATA
     ? join(process.env.PLUGIN_DATA, 'team-workbench') : '.team-workbench'));
 }
 const now = () => new Date().toISOString();
 export class Store {
-  constructor(directory = dataDirectory()) {
+  constructor(directory = dataDirectory(), options = {}) {
+    this.nativeEventJournal = options.nativeEventJournal ?? (process.env.TEAM_WORKBENCH_NATIVE_EVENTS ||
+      (process.env.PLUGIN_DATA ? join(directory, 'native-events-probe.sqlite') : null));
+    this.nativeMetadataReader = options.nativeMetadataReader ??
+      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeMetadata : null);
     mkdirSync(directory, { recursive: true });
     this.db = new DatabaseSync(join(directory, 'workbench.sqlite'));
     this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS boards (id TEXT PRIMARY KEY, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS panel_sessions (session_hash TEXT PRIMARY KEY, board_id TEXT NOT NULL)');
     // Additive plugin-owned table; existing board JSON/tasks are not rewritten.
     this.db.exec('CREATE TABLE IF NOT EXISTS work_records (seq INTEGER PRIMARY KEY AUTOINCREMENT, board_id TEXT NOT NULL, record_id TEXT NOT NULL, node_kind TEXT NOT NULL, node_id TEXT NOT NULL, workflow_id TEXT, digest TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(board_id,record_id)); CREATE INDEX IF NOT EXISTS work_records_node ON work_records(board_id,node_kind,node_id,seq); CREATE INDEX IF NOT EXISTS work_records_workflow ON work_records(board_id,workflow_id,seq)');
+    this.db.exec('CREATE TABLE IF NOT EXISTS native_event_receipts (board_id TEXT NOT NULL, source TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(board_id,source,seq))');
   }
   close() { this.db.close(); }
   sessionHash(session) {
@@ -60,7 +67,7 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const board = this.read(id);
-      operation(board);
+      if (operation(board) === false) { this.db.exec('COMMIT'); return this.view(board); }
       board.revision++; board.updatedAt = now();
       this.db.prepare('UPDATE boards SET state=? WHERE id=?').run(JSON.stringify(board), id);
       this.db.exec('COMMIT');
@@ -131,12 +138,14 @@ export class Store {
   reportMember(id, input) {
     return this.transact(id, b => {
       const memberId = text(input.memberId, 'memberId');
+      requireValue(!b.memberAliases?.[memberId], 'MEMBER_MERGED', 'This exact native member was consolidated; refresh and use its canonical ID');
       const existing = b.members.find(m => m.id === memberId);
       requireValue(!existing?.historyOnly, 'HISTORICAL_BINDING', 'This member belongs to a previous conversation binding; register a new member ID');
       requireValue(!existing || existing.source !== 'hook', 'OBSERVED_MEMBER', 'Hook observations cannot be overwritten by reports');
       if (existing?.nativeId && input.nativeId) requireValue(existing.nativeId===input.nativeId,'IDENTITY_CONFLICT','A recorded native identity cannot be silently replaced');
       if (existing?.runtimeRef && input.runtimeRef) requireValue(existing.runtimeRef===input.runtimeRef,'REFERENCE_CONFLICT','A recorded runtime reference cannot be silently replaced');
       const parentId = memberId === 'lead' ? null : (input.parentId ?? existing?.parentId ?? 'lead');
+      requireValue(!existing?.nativeTopology || parentId === existing.parentId, 'VERIFIED_PARENT_CONFLICT', 'A caller report cannot replace verified native parentage');
       requireValue(parentId === null || b.members.some(m => m.id === parentId), 'MEMBER_NOT_FOUND', 'Parent member not found');
       let cursor = parentId;
       while (cursor) {
@@ -267,10 +276,11 @@ export class Store {
     return { ...b, runs: b.runs ?? [], workflows: (b.workflows ?? []).map(w => ({ ...w, stale: Date.now() - Date.parse(w.observedAt) > 120000 })), sessionTree: sessionTree(b), tasks: b.tasks.filter(t => t.status !== 'deleted').map(t => ({ ...t,
       ready: this.ready(b, t), unresolved: t.blockedBy.filter(id => b.tasks.find(d => d.id === id)?.status !== 'completed') })),
       members: b.members.map(m => ({ ...m,
+        runtimeStatus: runtimeView(m),
         stale: Date.now() - Date.parse(m.observedAt) > 120000,
         runtimeFresh: !!m.runtimeObservation && Date.now()-Date.parse(m.runtimeObservation.observedAt) <= 120000 && Date.now()>=Date.parse(m.runtimeObservation.observedAt)-30000,
         resumable: null })),
-      capabilities: { nativeDiscovery: false, nativeJump: false, nativeResume: false,
+      capabilities: { nativeDiscovery: !!this.nativeEventJournal, nativeJump: false, nativeResume: false,
         hostConversationId: false, nativeExecution: 'lead-orchestrated-reported', lifecycle: 'optional-local-hooks-unverified-in-host',
         identity: 'caller-declared-not-authenticated', nativeTranscript: false, workRecords: 'explicit-reports-only' } };
   }

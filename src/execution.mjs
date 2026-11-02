@@ -42,11 +42,16 @@ export function recordExecution(store, input) {
         requireValue(run.status === 'requested', 'INVALID_TRANSITION', 'Only a requested run can be dispatched');
         requireValue(t.status === 'pending' && store.ready(b, t), 'TASK_BLOCKED', 'Task no longer ready');
         run.runtimeRef = text(input.runtimeRef, 'runtimeRef', 300);
-        run.memberId = `execution:${run.id}`;
-        requireValue(b.members.length < 100, 'MEMBER_LIMIT', 'Maximum 100 members');
-        b.members.push({ ...observation(input), id: run.memberId, name: input.memberName ? text(input.memberName, 'memberName', 100) : 'Native execution worker',
+        const nativeMember = input.nativeId ? b.members.find(m => !m.historyOnly && m.nativeId === input.nativeId) : null;
+        requireValue(!nativeMember?.runtimeRef || nativeMember.runtimeRef === run.runtimeRef, 'REFERENCE_CONFLICT', 'Do not assign another runtime path to an observed native member');
+        if (nativeMember?.nativeTopology) requireValue(nativeMember.parentId === run.parentMemberId, 'PARENT_MISMATCH', 'Spawn receipt conflicts with the verified native parent');
+        run.memberId = nativeMember?.id ?? `execution:${run.id}`;
+        requireValue(nativeMember || b.members.length < 100, 'MEMBER_LIMIT', 'Maximum 100 members');
+        const member = { ...nativeMember, ...observation(input), id: run.memberId, name: input.memberName ? text(input.memberName, 'memberName', 100) : 'Native execution worker',
           role: 'member', parentId: run.parentMemberId, source: 'reported', status: 'unknown',
-          nativeId: input.nativeId ?? null, runtimeRef: run.runtimeRef, workflowId: run.workflowId, observedAt: stamp(), relation: 'lead-reported-spawn' });
+          nativeId: input.nativeId ?? null, runtimeRef: run.runtimeRef, workflowId: run.workflowId, observedAt: stamp(), relation: nativeMember?.relation ?? 'lead-reported-spawn' };
+        if (nativeMember) {member.source = nativeMember.source;member.nativeIdentity = nativeMember.nativeIdentity;Object.assign(nativeMember,member);}
+        else b.members.push(member);
         t.status = 'in_progress'; t.ownerId = run.memberId; t.revision++; t.updatedAt = stamp();
         run.status = 'dispatched'; kind = 'lead-spawn-receipt'; break;
       case 'running':
@@ -75,8 +80,10 @@ export function recordExecution(store, input) {
     }
     if (run.memberId) {
       const m = b.members.find(m => m.id === run.memberId);
-      m.status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'completed' : run.status === 'failed' ? 'blocked' : 'unknown';
-      m.observedAt = stamp();
+      if (!m.nativeLifecycle) {
+        m.status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'completed' : run.status === 'failed' ? 'blocked' : 'unknown';
+        m.observedAt = stamp();
+      }
     }
     run.revision++; run.updatedAt = stamp(); run.evidence.push({ at: stamp(), kind, detail });
     store.event(b, 'execution_updated', `${run.id}: ${run.status}`);

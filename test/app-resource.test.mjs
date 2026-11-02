@@ -80,7 +80,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   const c = fixture(t); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.4.6');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.1');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
@@ -141,7 +141,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
 
   ids['bind-session'].onclick();
   const field=walk(ids['editor-fields']).find(n=>n.name==='sessionId');
-  assert.notEqual(field.readOnly,true);field.value='11111111-1111-4000-8000-000000000001';
+  assert.notEqual(field.readOnly,true);field.value='00000000-0000-4000-8000-000000009001';
   await ids['editor-form'].onsubmit({preventDefault(){}});
   assert.equal(ids['editor'].open,true);assert(ids['editor-fields'].textContent.includes('新绑定'));
   assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.rootSessionId,null);

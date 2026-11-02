@@ -1,15 +1,22 @@
-# Resource lifecycle and binding behavior
+# MCP entrypoint and update compatibility
 
-An older connected MCP process can keep tool code in memory while an installer
-removes its version's UI files. Loading those files lazily can then fail even
-while task tools still return data. Current versions retain the complete HTML
-at startup and return missing-resource errors with the original JSON-RPC ID.
-Versioned UI URIs distinguish fresh resources; the unversioned alias is retained.
+The panel tool advertises an MCP App resource URI. resources/read returns a
+self-contained HTML resource with script/style content. Returning board data or
+a plain webpage link does not prove that the native panel activated.
 
-A real host reconnect is still needed to use new server code. No update script
-kills a host process or rewrites the installed cache. Check the actual host's
-connection and UI version rather than assuming on-disk installation is active.
+UI content and the Windows public-metadata helper are retained by a live MCP
+process after startup. This reduces failures when an update prunes old static
+helper files while an old connection is still alive. Protocol/resource versions
+remain visible; a retained old process is still an old version.
 
-Binding edits require a full UUID and explicit old/new confirmation. Old members,
-executions and pages retain their sources and cannot silently become the new
-conversation. Archive/restore only changes board visibility, not project files.
+The actual GitHub-installed activation and hot reload remain unverified. Check
+which MCP version is connected and which resource URI it advertises before
+claiming an update took effect. Closing and reopening a panel does not by itself
+prove that the native host replaced its MCP connection. Do not overwrite installed
+caches, terminate unrelated processes or restart the client without authorization.
+
+The stdio protocol/resource tests verify advertised metadata, resources/read,
+self-contained dependencies and persistence. They cannot replace installed UI
+acceptance. Supported connection refresh guidance is documented by OpenAI, but
+an available control on a remote-MCP connection is not presumed to exist on every
+local plugin installation. Preserve data and source identity during updates.

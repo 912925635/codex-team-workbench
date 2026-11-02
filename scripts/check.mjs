@@ -33,8 +33,15 @@ assert.equal(mcp.$schema, 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.js
 assert.equal(mcp.mcpServers['team-workbench'].args[0], '${PLUGIN_ROOT}/src/server.mjs');
 assert.equal(legacy.mcpServers, './.mcp.json');
 assert.deepEqual(legacyMcp.mcpServers['team-workbench'].args, mcp.mcpServers['team-workbench'].args);
-// Optional hooks remain outside discovery paths and manifests until explicitly enabled.
-assert(!legacy.hooks); assert(!files.some(f => relative(root, f) === join('hooks', 'hooks.json')));
+// Bundled definitions require normal host trust; checking them never enables hooks.
+assert.equal(legacy.hooks, './examples/hooks/hooks.json');
+assert.equal(portable.extensions['com.openai'].hooks, legacy.hooks);
+const hooks = JSON.parse(readFileSync(resolve(root, legacy.hooks), 'utf8')).hooks;
+assert.deepEqual(Object.keys(hooks).sort(), ['PreModelRequest','SubagentStart','SubagentStop'].sort());
+for (const groups of Object.values(hooks)) for (const group of groups) for (const handler of group.hooks) {
+  assert.equal(handler.type, 'command');
+  assert.equal(handler.command, 'node \"${PLUGIN_ROOT}/src/native-hook.mjs\"');
+}
 const skill = readFileSync(join(root, 'skills/team-workbench/SKILL.md'), 'utf8');
 assert(skill.startsWith('---\nname: team-workbench\ndescription:'));
 for (const file of files) {
@@ -43,5 +50,5 @@ for (const file of files) {
   assert(!/[A-Z]:\\Users\\[^\\\s]+\\/i.test(content), `Personal absolute path in ${relative(root, file)}`);
   assert(!/sk-[a-zA-Z0-9_-]{20,}/.test(content), `Potential secret in ${relative(root, file)}`);
 }
-console.log(`PASS: syntax, JSON, manifest consistency, skill structure, optional hook isolation, and path/secret checks (${files.length} files).`);
+console.log(`PASS: syntax, JSON, manifest consistency, skill structure, reviewable hook definitions, and path/secret checks (${files.length} files).`);
 console.log('No TypeScript compiler or third-party lint dependency is required; these are JavaScript syntax and structural checks.');

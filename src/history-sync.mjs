@@ -1,4 +1,5 @@
 import { requireValue, text } from './validation.mjs';
+import { mergeNativeMember } from './native-members.mjs';
 export const isThreadId = id => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const isPath = ref => typeof ref === 'string' && /^\/root(?:\/[a-z0-9_]+)+$/.test(ref);
 
@@ -61,6 +62,8 @@ export function bindAgentActivity(store,input) {
         member.nativeId=resolution.nativeId;
         member.nativeIdentity={source:'public-subagent-activity',sourceThreadId:input.sourceThreadId,hostId:input.sourceHostId ?? null,
           activityItemIds:resolution.activityItemIds,observedAt:at,verification:'relayed-by-agent-not-server-authenticated'};
+        const duplicate=b.members.find(m=>m!==member && !m.historyOnly && m.nativeId===member.nativeId);
+        if(duplicate)mergeNativeMember(b,member,duplicate);
       }
     }
     member.identityResolution={...resolution,attemptedAt:at,sourceThreadId:input.sourceThreadId ?? null,

@@ -6,7 +6,7 @@ import { join, resolve, sep } from 'node:path';
 import { Store } from '../src/store.mjs';
 import { dispatch } from '../src/tools.mjs';
 
-const full = '12345678-1234-4000-8000-000000000001';
+const full = '00000000-0000-4000-8000-000000009002';
 function fixture(t, legacy = false) {
   const dir = mkdtempSync(join(tmpdir(), 'workbench-binding-repair-')), store = new Store(dir), board = store.create('Binding fixture');
   if (legacy) store.transact(board.id, b => { b.rootSessionId = '12345678'; b.members[0].nativeId = '12345678'; });
@@ -30,7 +30,7 @@ test('legacy or valid binding changes require exact previous value, explicit con
   assert.deepEqual(f.store.read(f.board.id),before);
   const changed=f.bind({previousSessionId:'12345678',confirmRebind:true,nativeIdSource:'user-supplied',evidence:'Explicit user confirmation of the shown old and new identities'}).board;
   assert.equal(changed.rootSessionId,full);assert.equal(changed.bindingHistory[0].sessionId,'12345678');
-  const next='99999999-1234-4000-8000-000000000002';
+  const next='00000000-0000-4000-8000-000000009005';
   const result=f.bind({sessionId:next,previousSessionId:full,confirmRebind:true,evidence:'Explicit user correction, different full ID is allowed after confirmation'}).board;
   assert.equal(result.rootSessionId,next);assert.equal(result.bindingHistory.length,2);
 });
@@ -38,7 +38,7 @@ test('legacy or valid binding changes require exact previous value, explicit con
 test('confirmed rebind preserves tasks and old sources but prevents old members/snapshots from syncing under the new parent',t=>{
   const f=fixture(t);f.bind({});
   const call=(name,args)=>dispatch(f.store,name,{boardId:f.board.id,...args});
-  const child='12345678-1234-4000-8000-000000000003',next='99999999-1234-4000-8000-000000000004';
+  const child='00000000-0000-4000-8000-000000009003',next='00000000-0000-4000-8000-000000009006';
   call('team_report_member',{memberId:'child',name:'Old child',status:'completed',parentId:'lead',runtimeRef:'/root/old_child',nativeId:child,evidence:'Synthetic old origin'});
   call('team_create_task',{title:'Keep old task'});
   call('team_request_execution',{taskId:'task-1',expectedTaskRevision:1});

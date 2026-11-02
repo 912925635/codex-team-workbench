@@ -9,7 +9,7 @@ const transcriptBoundary = { nativeAvailable: false, source: 'explicit-reports-e
 export function sessionTree(board) {
   const groups = board.workflows ?? [];
   const nodes = board.members.map(m => ({ id: `member:${m.id}`, kind: 'member', entityId: m.id, label: m.name,
-    parentId: m.workflowId ? `workflow:${m.workflowId}` : m.parentId ? `member:${m.parentId}` : null,
+    parentId: m.relation === 'session_association' ? null : m.workflowId ? `workflow:${m.workflowId}` : m.parentId ? `member:${m.parentId}` : null,
     agentParentId: m.relation === 'session_association' ? null : m.parentId, workflowId: m.workflowId ?? null, source: m.source, status: m.status }));
   nodes.push(...groups.map(w => ({ id: `workflow:${w.id}`, kind: 'workflow', entityId: w.id, label: w.title,
     parentId: `member:${w.parentMemberId}`, agentParentId: null, source: 'reported', status: w.status })));
@@ -34,6 +34,7 @@ export function recordWorkflow(store, input) {
 }
 
 function target(b, kind, id) {
+  if (kind === 'member') id = b.memberAliases?.[id] ?? id;
   const node = (kind === 'member' ? b.members : b.workflows ?? []).find(n => n.id === id);
   requireValue(node, 'NODE_NOT_FOUND', 'Recorded node not found in this board');
   return node;
@@ -96,18 +97,21 @@ export function importThreadPage(store, input) {
 
 export function readRecords(store, input) {
   const b = store.view(input.boardId), node = target(b, input.nodeKind, input.nodeId);
-  const filter = input.nodeKind === 'workflow' ? '(workflow_id=?)' : '(node_kind=\'member\' AND node_id=?)';
+  const nodeIds = input.nodeKind === 'member' ? [node.id, ...Object.entries(b.memberAliases ?? {}).filter(([,id])=>id===node.id).map(([alias])=>alias)] : [node.id];
+  const placeholders = nodeIds.map(()=>'?').join(',');
+  const filter = input.nodeKind === 'workflow' ? '(workflow_id=?)' : `(node_kind='member' AND node_id IN (${placeholders}))`;
   const limit = input.limit ?? 25;
   requireValue(limit > 0 && limit <= 100, 'INVALID_ARGUMENT', 'Page size must be between 1 and 100');
   const rows = store.db.prepare(`SELECT seq,payload FROM work_records WHERE board_id=? AND ${filter} AND seq>? ORDER BY seq LIMIT ?`)
-    .all(b.id, node.id, input.after ?? 0, limit + 1);
+    .all(b.id, ...nodeIds, input.after ?? 0, limit + 1);
   const page = rows.slice(0, limit).map(r => { const record=JSON.parse(r.payload), generation=record.bindingGeneration ?? 0;
     return {...record,seq:r.seq,historicalBinding:node.historyOnly || generation < (b.bindingGeneration ?? 0),originSessionId:record.originSessionId ?? b.bindingHistory?.find(h=>h.generation===generation)?.sessionId ?? null}; });
   const runs = b.runs.filter(r => input.nodeKind === 'workflow' ? r.workflowId === node.id : r.memberId === node.id || r.parentMemberId === node.id);
-  const lastHost = input.nodeKind === 'member' ? store.db.prepare("SELECT payload FROM work_records WHERE board_id=? AND node_kind='member' AND node_id=? AND json_extract(payload,'$.source')='public-host-page-relayed' AND json_extract(payload,'$.hostPage.threadId')=? ORDER BY seq DESC LIMIT 1").get(b.id,node.id,node.nativeId ?? null) : null;
+  const lastHost = input.nodeKind === 'member' ? store.db.prepare(`SELECT payload FROM work_records WHERE board_id=? AND node_kind='member' AND node_id IN (${placeholders}) AND json_extract(payload,'$.source')='public-host-page-relayed' AND json_extract(payload,'$.hostPage.threadId')=? ORDER BY seq DESC LIMIT 1`).get(b.id,...nodeIds,node.nativeId ?? null) : null;
   const lastRecord=lastHost ? JSON.parse(lastHost.payload) : null;
   const hostPage=lastRecord ? {...lastRecord.hostPage,recordId:lastRecord.recordId,readAt:lastRecord.observedAt,evidence:lastRecord.evidence} : null;
   return { ...transcriptBoundary, boardId: b.id, nodeKind: input.nodeKind, node,
+    hostActions: (b.hostActions ?? []).filter(a => a.memberId === node.id).slice(-20).reverse(),
     records: page, nextCursor: rows.length > limit ? page.at(-1).seq : null,
     executions: runs.slice(-50).reverse(), executionCount: runs.length,
     latestHostPage:hostPage, historySync:input.nodeKind==='member'?historySyncPlan(b,node,hostPage):null };

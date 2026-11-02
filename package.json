@@ -1,6 +1,6 @@
 {
   "name": "team-workbench",
-  "version": "0.4.6",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "description": "Local MCP team workspace with reported session trees, workflow groups and paginated work records.",
@@ -12,7 +12,8 @@
     "preview": "node src/preview.mjs",
     "check": "node scripts/check.mjs",
     "test": "node scripts/test.mjs",
-    "pack:local": "node scripts/package.mjs"
+    "pack:local": "node scripts/package.mjs",
+    "review:public": "node scripts/review-public.mjs"
   },
   "license": "MIT"
 }

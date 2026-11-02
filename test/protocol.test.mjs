@@ -38,7 +38,7 @@ test('actual stdio process: discovery, app resource, real tool calls and restart
     const init = await c.request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     assert.equal(init.result.serverInfo.name, 'team-workbench');
     const list = (await c.request('tools/list')).result.tools;
-    assert.equal(list.length, 16);
+    assert.equal(list.length, 18);
     for (const name of ['team_record_workflow', 'team_append_record', 'team_read_records', 'team_import_thread_page', 'team_bind_agent_activity']) assert(list.some(t => t.name === name));
     assert.deepEqual(list[0]._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
     const resource = await c.request('resources/read', { uri: 'ui://team-workbench/panel' });

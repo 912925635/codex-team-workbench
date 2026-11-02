@@ -1,20 +1,29 @@
-# Session browser
+# Session tree and node records
 
-The map displays recorded direct-parent relationships. Workflow groups affect
-presentation only; they never replace the actual parent edge. Clicking a node
-reads its saved records, execution receipts and latest saved host page.
+Nodes describe members and workbench workflow groups. Confirmed public native
+parent metadata, actual lead reports and unverified Hook session associations are
+source-labeled separately. A shared root association has no invented parent edge.
+Workflow grouping does not replace the actual direct spawning parent.
 
-A node with no native UUID cannot read an arbitrary host conversation. The lead
-can resolve an exact recorded runtime path using public subAgentActivity metadata
-from the exact recorded spawning parent. Ambiguous or missing mappings are saved
-as explicit blockers. The plugin never expands a short UUID by guessing.
+Node details show exact identifiers only when supplied by a real authorized
+source, along with observation time, runtime state and provenance. Token usage,
+resumability and success are not inferred. Original instructions and reported
+results remain distinct from partial visible-history pages.
 
-Saved pages retain thread and item IDs, source, read time, pagination and truncation
-scope. Hidden reasoning is excluded. Existing successful pages remain visible if
-a later synchronization fails. Binding changes isolate old sources; only an exact
-public match can revalidate a legacy short-parent record.
+- Reading or refreshing records loads saved workbench data. It does not request
+  fresh model output or silently read another native thread.
+- Native lifecycle polling reads the local plugin-owned journal through MCP;
+  this is not model polling. Fresh running observations animate a branch.
+  Expired evidence is visibly unconfirmed and never becomes fabricated completion.
+- Explicit history synchronization asks the actual lead for an exactly bound,
+  bounded public visible-history page. A request is not a completed import.
+- Opening a node requests the supported native navigation operation for its exact
+  UUID and records the host acknowledgment or failure.
+- Continuation requests can use verified public parent/path mapping, but the actual
+  spawning lead must check that the original agent is still available and the
+  supported collaboration operation exists. It records the real receipt.
+- Closing a pending workbench wait does not stop or retract an agent operation.
 
-The top refresh reloads saved data and the currently open node. To fetch a new
-native page, explicitly request the lead's sync protocol. Native open/continuation
-buttons request actual host actions through the lead and require the relevant
-capabilities and exact identity checks.
+The installed GitHub UI is not yet visually accepted. Source DOM tests exercise
+actual event handlers and rendered structure without driving the desktop. Public
+navigation API success is separate from a visual check. See [acceptance](ACCEPTANCE_0.5.1.md).

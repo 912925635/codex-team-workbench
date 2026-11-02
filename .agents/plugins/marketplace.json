@@ -1,0 +1,20 @@
+{
+  "name": "codex-team-workbench",
+  "interface": {
+    "displayName": "Codex Team Workbench"
+  },
+  "plugins": [
+    {
+      "name": "team-workbench",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

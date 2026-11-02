@@ -35,7 +35,7 @@ class WorkbenchBridge {
     if (this.preview) { this.ready = true; return; }
     if (window.parent === window) throw new Error('请在插件面板中打开；本地预览请使用 npm run preview');
     const result = await this.request('ui/initialize', {
-      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.4.6' },
+      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.5.1' },
       appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }
     });
     this.capabilities = result.hostCapabilities ?? {};

@@ -92,3 +92,13 @@ test('unfinished dependencies block execution and active runs cannot be manually
   b = f.record(last(b.runs), 'dispatched', { runtimeRef: 'fixture-ref' });
   assert.throws(() => f.call('team_update_task', { taskId: 'task-1', expectedRevision: b.tasks[0].revision, actorId: 'lead', action: 'complete' }), { code: 'RUN_ACTIVE' });
 });
+
+
+test('spawn receipt reuses an already observed native member and preserves original instructions', t => {
+ const f=fixture(t);let b=f.call('team_create_task',{title:'Original',description:'Original instructions'});const task=last(b.tasks);b=f.request(task);const run=last(b.runs);
+ const id='00000000-0000-4000-8000-000000000501';
+ f.store.transact(f.board.id,b=>b.members.push({id:'native:'+id,nativeId:id,source:'hook',role:'member',name:'Observed',parentId:'lead',relation:'session_association',status:'start_observed',nativeLifecycle:{event:'SubagentStart',observedAt:new Date().toISOString()},runtimeObservation:{state:'running',source:'native-command-hook',observedAt:new Date().toISOString()}}));
+ b=f.record(run,'dispatched',{nativeId:id,runtimeRef:'/root/fixture_observed',evidence:'Actual receipt fixture'});
+ assert.equal(b.members.filter(m=>m.nativeId===id).length,1);assert.equal(last(b.runs).memberId,'native:'+id);assert.equal(b.tasks[0].ownerId,'native:'+id);
+ assert.equal(last(b.runs).instructions,'Original instructions');assert.equal(b.members.find(m=>m.nativeId===id).runtimeObservation.source,'native-command-hook');
+});

@@ -1,18 +1,35 @@
-# Execution flow
+# Native execution flow
 
-1. Record a requested task execution; this starts no model.
-2. The authorized lead uses its host's actual native collaboration spawn tool.
-3. Record the real spawn receipt and exact direct parent/runtime reference.
-4. The child records work start and result; the lead collects and confirms the
-   result before the task becomes completed.
-5. Observe actual collaboration state for the exact member and parent identity,
-   relay timestamped observations, and synchronize selected visible history.
+A task assignment is stored responsibility, not a model launch. An authorized
+panel execution request is relayed to the current lead through advertised host
+messaging. The MCP process does not invoke a model or create an app-server.
 
-If the host lacks the needed collaboration or history tools, the plugin cannot
-supply them. It does not silently start an external worker app-server. A separately
-launched app-server is a distinct execution environment, not the desktop team.
+1. Read the exact board and requested execution; honor dependencies and revisions.
+2. The actual lead invokes its supported native collaboration spawn tool once.
+3. Only after the real tool result, record the exact runtime reference and dispatch
+   receipt with team_record_execution. A path is not a native thread UUID.
+4. Resolve identity from exact public parent activity when available. The normal
+   Hook/public-metadata path may independently discover the same exact UUID;
+   deterministic consolidation preserves ownership and immutable work records.
+5. Collect useful work, validation and the actual child result. A worker report
+   alone does not mark a task succeeded; the lead confirms the observed result.
+6. Lifecycle callbacks independently update running/idle evidence. The lead does
+   not poll a model to keep a status light active. A stop event is not task success.
 
-Task transition and revision semantics were adapted from DSH's task-board.ts.
-DSH uses its own agent/session/projection services and routes; this plugin replaces
-those with a local store and host-mediated requests. The DSH runtime integration
-cannot be copied into another host unchanged. See THIRD_PARTY_NOTICES.md.
+For nested authorized spawns, record the actual direct parent and keep workflow
+membership separate. Unknown ancestry stays unverified. Do not default a grandchild
+to the root or copy an inherited parent thread ID into the child's identity.
+
+Explicit navigation and continuation use team_request_host_action. The panel
+sends its exact action/member/native target to the lead. A sent message is pending,
+not succeeded. Missing tools, missing original agents and rejected routes must
+record failed. Navigation success requires an actual host navigation acknowledgment;
+continuation success requires the supported exact-agent operation and a fresh
+actual spawning-parent capability observation. Do not send direct V2 app-server
+input or silently spawn a replacement. Cancelling the workbench wait does not
+cancel an already delivered native operation.
+
+The real scoped tests verified actual native execution, same-child continuation,
+automatic callbacks and public parent/grandchild metadata. Installed UI button
+acceptance remains uncompleted; see [acceptance](ACCEPTANCE_0.5.1.md).
+No private real receipt or task data is distributed in this document.

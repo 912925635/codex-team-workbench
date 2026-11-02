@@ -18,7 +18,7 @@ export function handle(store, message) {
     case 'initialize':
       return reply({ protocolVersion: ['2025-03-26', '2025-06-18', '2025-11-25'].includes(message.params?.protocolVersion)
         ? message.params.protocolVersion : '2025-11-25',
-        serverInfo: { name: 'team-workbench', version: '0.4.6' },
+        serverInfo: { name: 'team-workbench', version: '0.5.1' },
         capabilities: { tools: {}, resources: {} },
         instructions: 'Use the team-workbench skill for authorized real execution and automatic history-sync protocol v1. Register actual direct parents and workflows. At dispatch/completion the lead uses its available public read_thread tool on the exact spawning parent, sends subAgentActivity metadata to team_bind_agent_activity for deterministic path/UUID binding, then reads only nextRead and imports selected visible child history. Missing tools/context/history are saved blockers; never substitute another parent/development child or start extra agents. MCP never invokes internal host tools/models or reads private sessions. Reports and bounded relayed pages retain source/completeness labels; full transcripts/native navigation are not claimed.' });
     case 'ping': return reply({});
