@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "team-workbench": {
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/src/server.mjs"],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

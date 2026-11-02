@@ -1,0 +1,12 @@
+.team-workbench/
+*.sqlite*
+node_modules/
+artifacts/
+*.log
+.env*
+!.env.example
+
+*.zip
+*.url
+*.tmp
+.DS_Store

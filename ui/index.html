@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN" data-preview="false">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Team Workbench · 团队工作台</title>
+  <style>/* APP_CSS */</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brandmark" aria-hidden="true">⌘</span><div><strong>Team Workbench</strong><span class="subtitle">让分工留在对话里</span></div></div>
+    <span id="connection" class="connection">正在连接…</span>
+  </header>
+  <main>
+    <div class="workspace-bar"><div class="workspace-title"><span class="eyebrow">WORKSPACE / 团队</span><h1>团队工作台</h1></div><div class="toolbar"><label class="sr-only" for="board-select">选择工作台</label><select id="board-select"><option value="">选择工作台</option></select><button id="archived-boards">已归档工作台</button><button id="new-board">＋ 工作台</button><button id="refresh" class="icon-button" aria-label="刷新已保存工作台数据" title="重读已保存数据，不主动同步原生会话">↻</button><span id="refresh-status" class="muted" role="status" aria-live="polite"></span></div></div>
+    <div id="notice" class="notice" role="status">正在读取本地工作台…</div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <section id="welcome" class="welcome" hidden><div class="empty-symbol" aria-hidden="true">⌘</div><span class="eyebrow">ONE CONVERSATION, SHARED CONTEXT</span><h2>把任务和团队放在一起</h2><p>先建一个工作台，再添加任务与协作成员。<br>每一条状态都会标明来源。</p><button id="welcome-create" class="primary">创建第一个工作台 <span aria-hidden="true">↗</span></button><div class="welcome-features"><span>01　共享任务</span><span>02　依赖与负责人</span><span>03　团队关系</span></div></section>
+    <div id="workspace" hidden>
+      <div class="board-heading"><div><h2 id="board-title"></h2><p id="board-meta" class="muted"></p></div><div class="toolbar"><button id="bind-session" class="text-button">关联会话标识</button><button id="archive-board" class="text-button">归档工作台</button></div></div>
+      <div class="stats" aria-label="任务统计"><div><span>全部任务</span><strong id="stat-total">0</strong></div><div><span><i class="dot amber"></i>进行中</span><strong id="stat-active">0</strong></div><div><span><i class="dot green"></i>已完成</span><strong id="stat-done">0</strong></div><div><span><i class="dot gray"></i>等待依赖</span><strong id="stat-blocked">0</strong></div></div>
+      <section class="task-section" aria-labelledby="tasks-heading">
+        <div class="section-heading"><div><span class="section-index">01</span><h2 id="tasks-heading">共享任务</h2><span id="task-count" class="count"></span></div><button id="new-task" class="primary">＋ 新建任务</button></div>
+        <div class="filters"><div id="owner-filters" class="chips" aria-label="负责人筛选"></div><label class="status-filter">状态 <select id="status-filter"><option value="all">全部</option><option value="pending">待领取</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="blocked">等待依赖</option></select></label></div>
+        <div id="task-list" class="task-list"></div>
+      </section>
+      <section class="team-section" aria-labelledby="team-heading">
+        <div class="section-heading"><div><span class="section-index">02</span><h2 id="team-heading">团队关系</h2><span id="member-count" class="count"></span></div><button id="new-member">＋ 记录成员</button></div>
+        <p class="section-note">点击节点查看详情与记录，＋／− 折叠层级。工作流为显示分组，成员实际代理上级单独保留。</p>
+        <div id="team-map" class="team-map"></div>
+        <div class="legend"><span><i class="legend-line"></i>已记录的成员关系</span><span><i class="legend-line dashed"></i>hook 的会话关联（非完整调用树）</span></div>
+      </section>
+      <details class="activity"><summary>最近动态 <span id="activity-count"></span></summary><ol id="activity-list"></ol></details>
+      <footer><span id="sync-state">本地持久化 · 无外部服务</span><span>会话打开与续接由主代理处理，以实际回执为准</span></footer>
+    </div>
+  </main>
+  <dialog id="editor"><form id="editor-form"><div class="dialog-heading"><h2 id="editor-title"></h2><button type="button" id="close-editor" class="icon-button" aria-label="关闭">×</button></div><div id="editor-fields"></div><div id="form-error" class="error" role="alert" hidden></div><div class="dialog-actions"><button type="button" id="cancel-editor">取消</button><button type="submit" class="primary" id="submit-editor">保存</button></div></form></dialog>
+  <dialog id="task-detail"><div class="dialog-heading"><span class="eyebrow" id="detail-id"></span><button id="close-detail" class="icon-button" aria-label="关闭任务详情">×</button></div><h2 id="detail-title"></h2><div id="detail-body"></div></dialog>
+  <dialog id="node-detail"><div class="dialog-heading"><span class="eyebrow">SESSION / WORKFLOW</span><button id="close-node" class="icon-button" aria-label="关闭节点详情">×</button></div><h2 id="node-title"></h2><div id="node-body"></div></dialog>
+  <script>/* APP_JS */</script>
+</body>
+</html>

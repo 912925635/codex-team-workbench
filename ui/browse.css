@@ -1,0 +1,24 @@
+/* Session browser additions. The user's existing style.css is retained unchanged. */
+.browse-branch-head{position:relative;display:flex;align-items:center}
+.browse-card{padding:0;display:block;white-space:normal;color:var(--ink)}
+.browse-card .member-top,.browse-card .member-name,.browse-card .member-id,.browse-card .member-task{display:block}
+.browse-card .member-task{white-space:pre-wrap}
+.browse-disclosure{position:absolute;right:calc(100% + 5px);padding:0;width:23px;height:23px;font-size:16px;border-radius:50%;z-index:1}
+.browse-workflow>.browse-branch-head>.browse-card{border-style:dashed;background:var(--accent-soft)}
+.browse-workflow:before,.browse-workflow:after{border-style:dashed}
+#node-detail{width:min(760px,calc(100% - 32px))}
+#node-body p{font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
+#node-body h3{margin:24px 0 12px;font-size:14px}
+.browse-reader-actions{display:flex;gap:8px;flex-wrap:wrap}
+.browse-entry{border:1px solid var(--line);border-radius:7px;padding:14px;margin:10px 0;background:var(--surface)}
+.browse-entry strong{font-size:12px}
+.browse-execution{padding-bottom:14px}
+.browse-result{white-space:pre-wrap;overflow-wrap:anywhere}
+.browse-history{display:block;width:100%;margin:12px 0}
+@media(max-width:520px){#node-body .detail-grid{grid-template-columns:1fr}.browse-disclosure{right:calc(100% + 2px);width:20px;height:20px}}
+
+/* Animate only a fresh, explicitly observed native running state. */
+.tree-branch.runtime-active:before,.tree-branch.runtime-active:after{border-color:var(--accent);animation:runtime-pulse 1.2s ease-in-out infinite}
+@keyframes runtime-pulse{0%,100%{opacity:.35}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.tree-branch.runtime-active:before,.tree-branch.runtime-active:after{animation:none;opacity:1}}
+.browse-resume-form{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.browse-resume-form textarea{min-width:240px;min-height:70px;flex:1}
