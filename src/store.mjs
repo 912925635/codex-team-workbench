@@ -9,26 +9,54 @@ import { sessionTree, observation } from './browse.mjs';
 import { isThreadId } from './history-sync.mjs';
 import { runtimeView } from './runtime-view.mjs';
 import { readNativeMetadata } from './native-topology.mjs';
+import { readNativeHistory, readNativeHistoryAsync } from './native-history.mjs';
+import { ensureAutoHistoryWatch, stopAutoHistory } from './auto-history.mjs';
 
 export function dataDirectory() {
   return resolve(process.env.TEAM_WORKBENCH_DATA || (process.env.PLUGIN_DATA
     ? join(process.env.PLUGIN_DATA, 'team-workbench') : '.team-workbench'));
 }
 const now = () => new Date().toISOString();
+const startupWait = new Int32Array(new SharedArrayBuffer(4));
+function initializeDatabase(db) {
+  // SQLite can return BUSY immediately when two first connections switch the
+  // same new database to WAL. Retry only this bounded, idempotent setup; never
+  // retry task mutations or hide revision conflicts.
+  db.exec('PRAGMA busy_timeout=200');
+  const deadline=Date.now()+2000;
+  for (;;) {
+    try {
+      db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS boards (id TEXT PRIMARY KEY, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS panel_sessions (session_hash TEXT PRIMARY KEY, board_id TEXT NOT NULL)');
+      db.exec('CREATE TABLE IF NOT EXISTS work_records (seq INTEGER PRIMARY KEY AUTOINCREMENT, board_id TEXT NOT NULL, record_id TEXT NOT NULL, node_kind TEXT NOT NULL, node_id TEXT NOT NULL, workflow_id TEXT, digest TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(board_id,record_id)); CREATE INDEX IF NOT EXISTS work_records_node ON work_records(board_id,node_kind,node_id,seq); CREATE INDEX IF NOT EXISTS work_records_workflow ON work_records(board_id,workflow_id,seq)');
+      db.exec('CREATE TABLE IF NOT EXISTS native_event_receipts (board_id TEXT NOT NULL, source TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(board_id,source,seq))');
+      db.exec('CREATE TABLE IF NOT EXISTS native_history_claims (job_id TEXT PRIMARY KEY, board_id TEXT NOT NULL, owner TEXT NOT NULL, lease_until INTEGER NOT NULL, attempts INTEGER NOT NULL, state TEXT NOT NULL)');
+      break;
+    } catch(error) {
+      if(![5,6].includes(error.errcode & 255) || Date.now()>=deadline)throw error;
+      Atomics.wait(startupWait,0,0,50);
+    }
+  }
+  db.exec('PRAGMA busy_timeout=5000');
+}
 export class Store {
   constructor(directory = dataDirectory(), options = {}) {
+    this.autoHistoryEnabled=options.autoHistory!==false;
     this.nativeEventJournal = options.nativeEventJournal ?? (process.env.TEAM_WORKBENCH_NATIVE_EVENTS ||
       (process.env.PLUGIN_DATA ? join(directory, 'native-events-probe.sqlite') : null));
     this.nativeMetadataReader = options.nativeMetadataReader ??
       (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeMetadata : null);
+    this.nativeHistoryReader = options.nativeHistoryReader ??
+      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeHistory : null);
+    this.nativeHistoryAsyncReader = options.nativeHistoryAsyncReader ??
+      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeHistoryAsync : null);
+    this.autoHistoryRetryMs=options.autoHistoryRetryMs;
     mkdirSync(directory, { recursive: true });
     this.db = new DatabaseSync(join(directory, 'workbench.sqlite'));
-    this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS boards (id TEXT PRIMARY KEY, state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS panel_sessions (session_hash TEXT PRIMARY KEY, board_id TEXT NOT NULL)');
     // Additive plugin-owned table; existing board JSON/tasks are not rewritten.
-    this.db.exec('CREATE TABLE IF NOT EXISTS work_records (seq INTEGER PRIMARY KEY AUTOINCREMENT, board_id TEXT NOT NULL, record_id TEXT NOT NULL, node_kind TEXT NOT NULL, node_id TEXT NOT NULL, workflow_id TEXT, digest TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(board_id,record_id)); CREATE INDEX IF NOT EXISTS work_records_node ON work_records(board_id,node_kind,node_id,seq); CREATE INDEX IF NOT EXISTS work_records_workflow ON work_records(board_id,workflow_id,seq)');
-    this.db.exec('CREATE TABLE IF NOT EXISTS native_event_receipts (board_id TEXT NOT NULL, source TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY(board_id,source,seq))');
+    try { initializeDatabase(this.db); } catch(error) { this.db.close(); throw error; }
+    if(this.autoHistoryEnabled)ensureAutoHistoryWatch(this);
   }
-  close() { this.db.close(); }
+  close() { stopAutoHistory(this);this.db.close(); }
   sessionHash(session) {
     return typeof session === 'string' && session.length > 0 && session.length <= 1024
       ? createHash('sha256').update(session).digest('hex') : null;

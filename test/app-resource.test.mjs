@@ -8,12 +8,12 @@ import { join, resolve, sep } from 'node:path';
 import vm from 'node:vm';
 
 const root = resolve(import.meta.dirname, '..');
-function fixture(t, { missingUi = false } = {}) {
+function fixture(t, { missingUi = false, automaticHistory = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'workbench-resource-regression-'));
   for (const name of ['src', 'ui']) cpSync(join(root, name), join(dir, name), { recursive: true });
   if (missingUi) rmSync(join(dir, 'ui'), { recursive: true });
   const child = spawn(process.execPath, [join(dir, 'src/server.mjs')], {
-    cwd: dir, env: { ...process.env, TEAM_WORKBENCH_DATA: join(dir, 'isolated-data') },
+    cwd: dir, env: { ...process.env, TEAM_WORKBENCH_DATA: join(dir, 'isolated-data'),...(automaticHistory?{PLUGIN_DATA:join(dir,'isolated-plugin-data')}:{}) },
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map(); let next = 0, stderr = '';
   child.stderr.on('data', d => { stderr += d; });
@@ -45,8 +45,14 @@ const resource = c => c.request('resources/read', { uri: 'ui://team-workbench/pa
 test('a running MCP connection retains its complete UI after an upgrade prunes its old UI directory', async t => {
   const c = fixture(t); await initialize(c);
   const before = (await resource(c)).result.contents[0];
-  assert(before.text.includes('关联并同步子代理记录'));
+  assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
+  for(const version of ['0.4.2','0.5.1']){
+    const oldUri=`ui://team-workbench/panel/${version}`;
+    const alias=await c.request('resources/read',{uri:oldUri});
+    assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
+  }
+  assert.equal((await c.request('resources/read',{uri:'ui://unrelated/panel/0.5.1'})).error.code,-32002);
   rmSync(join(c.dir, 'ui'), { recursive: true }); // Only this isolated fixture.
   const after = await resource(c);
   assert.equal(after.result.contents[0].text, before.text);
@@ -69,6 +75,7 @@ class Element {
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
   append(...nodes) { this.children.push(...nodes); }
+  prepend(...nodes) { this.children.unshift(...nodes); }
   replaceChildren(...nodes) { this._text = ''; this.children = [...nodes]; }
   setAttribute(k, v) { this.attributes[k] = v; }
   addEventListener() {}
@@ -77,10 +84,10 @@ class Element {
 }
 
 test('the actual resources/read HTML boots through ui/initialize and tools/call with all bundled scripts', async t => {
-  const c = fixture(t); await initialize(c);
+  const c = fixture(t,{automaticHistory:true}); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.1');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.2');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
@@ -104,8 +111,9 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
       if(isSnapshot && holdSnapshot)await new Promise(resolve=>{releaseSnapshot=resolve;});
       const result = isSnapshot && failSnapshot ? {isError:true,structuredContent:{error:{code:'TEST_FAILURE',message:'Fixture refresh failed'}}}
         : message.method === 'ui/initialize'
-        ? { hostCapabilities: { serverTools: {} }, hostContext: {}, hostInfo: { name: 'Deterministic fixture' } }
-        : (await c.request(message.method, { ...message.params, arguments: { ...message.params.arguments, boardId: board.id } })).result;
+        ? { hostCapabilities: { serverTools: {}, message:{text:{}}, experimental:{'openai/message':{}} }, hostContext: {}, hostInfo: { name: 'Deterministic fixture' } }
+        : message.method==='ui/message' ? {}
+        : (await c.request(message.method, { ...message.params, arguments: { ...message.params.arguments, ...(['team_snapshot','team_panel'].includes(message.params.name)?{boardId:message.params.arguments.boardId ?? board.id}:{}) } })).result;
       listener({ source: window.parent, data: { jsonrpc: '2.0', id: message.id, result } });
       if (message.method === 'tools/call') setImmediate(settle);
     })().catch(reject);
@@ -114,6 +122,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
     setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, console, FormData: class {
       constructor(form) {const all=n=>[n,...n.children.flatMap(all)];this.values=new Map(all(form).filter(n=>n.name && (n.type!=='checkbox'||n.checked)).map(n=>[n.name,n.type==='checkbox'?'on':n.value]));}
       get(name) {return this.values.get(name) ?? null;}
+      getAll(name) {return this.values.has(name)?[this.values.get(name)]:[];}
     } };
   vm.runInNewContext(scripts[0], context, { filename: 'actual-mcp-resource.js', timeout: 1000 });
   await completed;
@@ -139,6 +148,33 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   assert(ids['refresh-status'].textContent.includes('刷新失败'));assert(ids['error'].textContent.includes('Fixture refresh failed'));assert.equal(ids['refresh'].disabled,false);
   failSnapshot=false;
 
+  // Exercise the actual bundled UI handlers against a real isolated stdio MCP.
+  // The host frame is a protocol fixture, never a real Desktop acceptance claim.
+  const submit=()=>ids['editor-form'].onsubmit({preventDefault(){}});
+  const fieldByName=name=>walk(ids['editor-fields']).find(n=>n.name===name);
+  const clickDetail=label=>walk(ids['detail-body']).find(n=>n.tagName==='button'&&n.textContent===label).onclick();
+  const openTask=title=>walk(ids['task-list']).find(n=>n.className?.includes('task-row')&&n.textContent.includes(title)).onclick();
+  ids['new-task'].onclick();fieldByName('title').value='Direct CRUD fixture';fieldByName('description').value='PRIVATE_TASK_INSTRUCTIONS_FIXTURE';await submit();
+  let saved=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board;
+  assert(saved.tasks.some(t=>t.title==='Direct CRUD fixture'));
+  openTask('Direct CRUD fixture');await clickDetail('由协调者领取');await clickDetail('释放任务');await clickDetail('由协调者领取');await clickDetail('标记完成');await clickDetail('重新打开');
+  await clickDetail('编辑');fieldByName('title').value='Edited direct CRUD fixture';await submit();
+  openTask('Edited direct CRUD fixture');await clickDetail('转派');fieldByName('ownerId').value='lead';await submit();
+  openTask('Edited direct CRUD fixture');await clickDetail('释放任务');await clickDetail('编辑依赖');await submit();
+  saved=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board;
+  const target=saved.tasks.find(t=>t.title==='Edited direct CRUD fixture');assert.equal(target.status,'pending');assert.deepEqual(target.blockedBy,[]);
+  const beforeCancel=methods.length;ids['new-task'].onclick();ids['cancel-editor'].onclick();assert.equal(methods.length,beforeCancel);
+  assert.equal(methods.filter(m=>m==='ui/message').length,0,'CRUD, saved refresh, opening details and cancel do not message the lead');
+  openTask('Edited direct CRUD fixture');
+  const execution=walk(ids['detail-body']).find(n=>n.tagName==='button'&&n.textContent==='请求执行（主会话）');
+  assert(execution);assert.equal(execution.disabled,false);assert(ids['detail-body'].textContent.includes('消息只携带请求标识'));
+  const pending=execution.onclick();await execution.onclick();await pending;
+  assert.equal(methods.filter(m=>m==='ui/message').length,1,'Only the explicit execution button sends one compact request');
+  saved=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board;
+  assert.equal(saved.runs.filter(r=>r.taskId===target.id).length,1);
+  assert.equal(saved.runs.find(r=>r.taskId===target.id).instructions,'PRIVATE_TASK_INSTRUCTIONS_FIXTURE');
+  ids['close-detail'].onclick();
+
   ids['bind-session'].onclick();
   const field=walk(ids['editor-fields']).find(n=>n.name==='sessionId');
   assert.notEqual(field.readOnly,true);field.value='00000000-0000-4000-8000-000000009001';
@@ -148,9 +184,21 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   walk(ids['editor-fields']).find(n=>n.name==='confirmed').checked=true;
   await ids['editor-form'].onsubmit({preventDefault(){}});
   assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.rootSessionId,field.value);
+  if(process.platform==='win32'){
+    assert.equal(ids['auto-history'].disabled,false);ids['auto-history'].onclick();
+    await submit();assert.equal(ids['editor'].open,true);assert(ids['form-error'].textContent.includes('确认'));
+    assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.nativeHistorySync,undefined);
+    fieldByName('confirmed').checked=true;await submit();assert(ids['auto-history'].textContent.includes('开'));
+    ids['auto-history'].onclick();fieldByName('confirmed').checked=true;await submit();assert(ids['auto-history'].textContent.includes('关'));
+    assert.equal(methods.filter(m=>m==='ui/message').length,1,'Automatic-sync configuration uses MCP and requires no main-chat request');
+  }else assert.equal(ids['auto-history'].disabled,true);
   ids['archive-board'].onclick();
   assert(ids['editor-fields'].textContent.includes('不会删除项目文件'));
   walk(ids['editor-fields']).find(n=>n.name==='confirmed').checked=true;
   await ids['editor-form'].onsubmit({preventDefault(){}});
   assert.equal(ids['workspace'].hidden,true);assert(ids['archived-boards'].textContent.includes('1'));
+  ids['archived-boards'].onclick();walk(ids['editor-fields']).find(n=>n.name==='confirmed').checked=true;await submit();
+  assert.equal(ids['workspace'].hidden,false);assert.equal(methods.filter(m=>m==='ui/message').length,1);
+  ids['new-board'].onclick();fieldByName('title').value='Another direct board fixture';await submit();
+  assert.equal(ids['board-title'].textContent,'Another direct board fixture');assert.equal(methods.filter(m=>m==='ui/message').length,1);
 });

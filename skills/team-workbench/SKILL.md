@@ -7,6 +7,10 @@ Use the plugin's MCP tools to keep a persistent shared task board. Opening or
 using this skill alone does not authorize additional subagents or changes to host
 configuration. Follow the user's task scope and host delegation rules.
 
+For a panel protocolVersion 3 request, start with the compact request protocol
+below instead of listing/loading whole boards. Ordinary UI refreshes and direct
+history reads require no lead response.
+
 1. Call `team_snapshot` to list boards. Select the board explicitly associated
    with the current task; do not silently pick the latest board belonging to
    another conversation. Create an empty board with `team_create_board` if needed.
@@ -165,6 +169,10 @@ page` request asks the CURRENT lead to do a read, not to start an agent.
 
 ## Automatic identity and history-sync protocol v1
 
+Compatibility fallback only: use this section for an explicitly requested
+lead-assisted identity/history operation when direct backend access is missing.
+It is not routine synchronization on every dispatch, completion or refresh.
+
 Run this during normal dispatch/completion as above, or when the panel posts
 `Synchronize Team Workbench member history v1`. The UI sends one request to the
 active main conversation; no user needs to guess a child UUID.
@@ -254,7 +262,9 @@ and never stops agents. Do not archive any real board during testing.
 
 ## Explicit native navigation request
 
-When the user clicks 打开对应子代理会话, verify that the supplied full UUID is
+The primary 打开对应子代理会话 button requests ui/open-link directly and does
+not ask the lead. Handle only the explicitly labeled 请求主会话打开 fallback.
+For that explicit request, verify that the supplied full UUID is
 still the selected member's binding. If codex-app-tools.navigate_to_codex_page
 is available, call it once with that exact threadId and report the result. If it
 is unavailable or returns an error, say so; never infer a different UUID, send a
@@ -307,3 +317,50 @@ to assume the agent exists: first use list_agents in the exact spawning parent.
 If absent (including after the parent runtime was reloaded), record failed with
 the concrete reason and do not create a substitute. Before a succeeded receipt,
 record the fresh exact-parent capability observation after the actual operation.
+
+
+## Compact requests and direct panel actions (development 0.5.2)
+
+Do not respond to an ordinary refresh, record read or direct-link request with a
+new model operation. The panel performs these calls itself. In particular:
+
+- `team_sync_native_history` directly reads one visible page through the existing
+  public app-server after checking exact bound UUIDs and the full parent chain.
+  No lead message is required. It saves only selected user/agent text, with
+  pagination and truncation labels. A direct-read error must not cause an
+  automatic lead-message fallback or a read of the parent instead of the child.
+- `ui/open-link` is capability-negotiated. Its positive response is `accepted`,
+  not visible navigation certification. Never promote that to `succeeded` or
+  bypass a denied scheme using an OS launch, private IPC or browser automation.
+- Only an explicitly labeled lead action sends a main-chat message. Do not
+  attempt native spawn/continuation merely because a task was assigned.
+
+A protocolVersion 3 execution request contains boardId and runId. First call
+`team_get_request` with kind=`execution` and requestId=runId. Use its exact saved
+instructions, task/request revision and parent identity. Do not fetch the whole
+board or unrelated history just to find the task body. Continue the existing
+native dispatch/result/confirmation protocol with actual supported tools.
+
+When that response reports backendSync.directHistoryAvailable, do not read the
+parent/child chat repeatedly to maintain the panel. Record only actual dispatch,
+agent references and task-result receipts needed for the requested work. Native
+Hooks supply lifecycle IDs; the backend validates public ancestry and reads
+bounded visible history. The older v1 lead history procedure is an
+explicit fallback for unavailable direct identity/history access, not a mandatory
+step on every dispatch/completion or refresh. Never enable automatic content
+collection merely because Hooks are trusted: team_set_history_sync requires
+explicit confirmation for its exact board root.
+
+A protocolVersion 3 continuation contains boardId, actionId and nativeId. Call
+`team_get_request` with kind=`host-action` and requestId=actionId, then verify the
+returned UUID equals the request. Instructions and current revision are stored
+there. The UI can message only the active main chat; it cannot target an arbitrary
+parent. If this chat is not the exact recorded spawning parent, record failed
+with the actual capability/source reason. Do not forward to another conversation,
+create a substitute, or directly input to V2 children. Record the fresh actual
+parent/agent observation and supported-operation receipt before any success.
+
+Navigation fallback requests may still use protocolVersion 2. Resolve the exact
+action through `team_get_request`; do not assume expectedRevision from an old
+message is current. Only a real navigation tool receipt can succeed. The button
+already labels that requesting the lead sends one message.

@@ -4,8 +4,8 @@ A local MCP workbench for native Codex collaborators, inspired by DeepSeek Harne
 Tasks, lifecycle observations, exact parent relationships and source-labeled records
 share one conversation panel.
 
-**0.5.1 是开发快照。真实原生事件与续接链路已实测；从 GitHub 安装后的完整桌面
-UI 验收尚未完成。** 原稳定源码仍可追溯至提交
+**0.5.2 为开发验证版，GitHub 源码发布不代表已在你的客户端安装。真实历史直读已实测；客户端
+直接跳转与完整桌面 UI 验收尚未完成。** 原稳定源码仍可追溯至提交
 [`3a66a9a`](https://github.com/912925635/codex-team-workbench/commit/3a66a9accb0a8ae9fb6dc54fefad1b45d5424d29)。
 
 ## 已实现与实测
@@ -21,16 +21,29 @@ UI 验收尚未完成。** 原稳定源码仍可追溯至提交
   活跃性待确认」，真实停止回调到达后才转为空闲。
 - 初始指令、执行结果与可见会话快照分开保存。快照是有来源、有边界的可见历史，
   不冒充完整工具或推理转录。
-- 打开/续接请求绑定准确成员 UUID、父会话和运行路径，由主代理调用宿主支持的工具。
-  消息发出不等于执行成功；旧代理不在目录时不新建替身。
+- 已绑定会话的可见历史可通过公开分页接口直接读取；刷新运行记录直接读取已接收事件，
+  均不向主对话发消息。打开按钮使用宿主声明的 `openLinks` / `ui/open-link`，准确保留
+  拒绝或链接回执；当前客户端是否接受 `codex://` 仍待实测。
+- 明确对当前工作台启用后，后台监听现有插件事件日志，在子代理回合停止后自动同步
+  一页可见消息，按事件键去重，无需主代理回读。旧工作台默认关闭，不扩大 Hooks 范围。
+- 启动、续接及可选的主会话协助操作明确标注会发送请求；任务正文保存在后端，执行与
+  续接消息只带请求标识。消息发出不等于执行成功；旧代理不在目录时不新建替身。
 
-最近完整回归为 92 项通过；GitHub 目录结构也有独立检查。真实验证摘要见
-[验收记录](docs/ACCEPTANCE_0.5.1.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
+0.5.1 基线为 92 项通过；当前 0.5.2 本地回归 118 项通过。按钮路径、真实直读证据与未完成的宿主检查见
+[0.5.2 按钮验收](docs/BUTTON_ACTIONS_0.5.2.md)，原生事件证据见
+[0.5.1 验收记录](docs/ACCEPTANCE_0.5.1.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
 公开仓库仅含合成测试数据，不含真实会话标识、转录、任务数据库或测试回执。
+后台架构、实测耗时与尚未测量的部分见 [数据流说明](docs/DATA_FLOW_0.5.2.md)。
+0.5.2 隔离后端已用真实新代理及同一代理续接验证，两个停止事件到会话页保存分别为
+1158 / 1021 毫秒。该验证使用现有测试探针；打包 Hooks 与客户端画面仍待实际加载验收。
 
 ## 从 GitHub 添加
 
 标准目录清单位于 `.agents/plugins/marketplace.json`，`./` 指向仓库根部插件。
+市场名保持 `codex-team-workbench`，插件名保持 `team-workbench`。已经添加这个
+GitHub 市场的用户应更新原来源，不需要重复创建插件。跟踪 `main` 可获取后续源码，
+固定 commit 不会跟随更新；市场同步、安装更新与活跃 MCP 连接重载是不同步骤。
+详见 [市场与更新说明](docs/MARKETPLACE.md)。
 
 官方已核实的工作区同步路径需要**工作区管理员**：
 

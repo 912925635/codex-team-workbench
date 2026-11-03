@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { isThreadId } from './history-sync.mjs';
 // Keep helper source with the live MCP connection, just like the self-contained UI.
@@ -6,16 +6,50 @@ import { isThreadId } from './history-sync.mjs';
 let metadataScript = null;
 try { metadataScript = readFileSync(new URL('./read-native-metadata.ps1', import.meta.url), 'utf8'); } catch {}
 
-export function readNativeMetadata(threadIds) {
+export function readBoundPublic(request) {
+  const { threadIds } = request;
   if (!threadIds.length || threadIds.length > 100 || !threadIds.every(isThreadId)) throw new Error('Invalid metadata scope');
   if (!metadataScript) throw new Error('Public metadata helper was unavailable at startup');
   const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(metadataScript, 'utf16le').toString('base64')], {
-    input: JSON.stringify({ threadIds }), encoding: 'utf8', windowsHide: true, timeout: 20000, maxBuffer: 1048576
+    input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 20000, maxBuffer: 1048576
   });
-  if (result.status !== 0) throw new Error('Public metadata connection unavailable');
-  const data = JSON.parse(result.stdout);
-  if (!data.connected || !Array.isArray(data.threads)) throw new Error('Public metadata response unavailable');
-  return data.threads.filter(row => threadIds.includes(row.id));
+  let data;
+  try { data = JSON.parse(result.stdout); } catch {}
+  if (result.status !== 0 || !data?.connected || !Array.isArray(data.threads))
+    throw new Error(data?.message?.slice(0, 1000) || 'Public app-server read connection unavailable');
+  return { ...data, threads: data.threads.filter(row => threadIds.includes(row.id)) };
+}
+
+export function readNativeMetadata(threadIds) {
+  return readBoundPublic({ threadIds }).threads;
+}
+
+// Same public, bounded request as the explicit reader, without blocking MCP
+// while an event-triggered background history page is being fetched.
+export function readBoundPublicAsync(request, { signal } = {}) {
+  const { threadIds }=request;
+  if(!threadIds?.length || threadIds.length>100 || !threadIds.every(isThreadId) || !metadataScript)
+    return Promise.reject(new Error('Invalid or unavailable public read scope'));
+  return new Promise((resolve,reject)=>{
+    let output='',bytes=0,settled=false;
+    const child=spawn('pwsh',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(metadataScript,'utf16le').toString('base64')],
+      {windowsHide:true,stdio:['pipe','pipe','pipe']});
+    const finish=(error,data)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);error?reject(error):resolve(data);};
+    const abort=()=>{child.kill();finish(new Error('Public history read cancelled'));};
+    const timer=setTimeout(()=>{child.kill();finish(new Error('Public history reader timed out'));},20000);
+    child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{bytes+=Buffer.byteLength(chunk);if(bytes>1048576){child.kill();finish(new Error('Public reader output exceeded limit'));}else output+=chunk;});
+    child.stderr.on('data',()=>{}); // Drain diagnostics; never retain raw host content.
+    child.on('error',error=>finish(error));
+    child.stdin.on('error',error=>finish(error));
+    child.on('close',code=>{
+      if(settled)return;
+      let data;try{data=JSON.parse(output);}catch{}
+      if(code!==0 || !data?.connected || !Array.isArray(data.threads))finish(new Error(data?.message?.slice(0,1000)||'Public app-server read connection unavailable'));
+      else finish(null,{...data,threads:data.threads.filter(row=>threadIds.includes(row.id))});
+    });
+    signal?.addEventListener('abort',abort,{once:true});
+    if(signal?.aborted)abort();else child.stdin.end(JSON.stringify({...request,mode:'history'}));
+  });
 }
 
 export function topologyPlan(rootId, members, metadata) {

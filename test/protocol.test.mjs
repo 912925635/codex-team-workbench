@@ -27,7 +27,13 @@ function client(dir) {
       pending.set(requestId, { resolve, timer });
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: requestId, method, params }) + '\n');
     }); },
-    async close() { child.stdin.end(); await ended; assert.equal(stderr, ''); },
+    async close() {
+      child.stdin.end();
+      let timer;
+      try { await Promise.race([ended,new Promise((_,reject)=>{timer=setTimeout(()=>{child.kill();reject(new Error('Owned isolated MCP fixture did not exit after stdin closed'));},3000);})]); }
+      finally {clearTimeout(timer);for(const waiter of pending.values())clearTimeout(waiter.timer);pending.clear();}
+      assert.equal(stderr, '');
+    },
     async tool(name, args) { return (await this.request('tools/call', { name, arguments: args })).result; }
   };
 }
@@ -38,8 +44,8 @@ test('actual stdio process: discovery, app resource, real tool calls and restart
     const init = await c.request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
     assert.equal(init.result.serverInfo.name, 'team-workbench');
     const list = (await c.request('tools/list')).result.tools;
-    assert.equal(list.length, 18);
-    for (const name of ['team_record_workflow', 'team_append_record', 'team_read_records', 'team_import_thread_page', 'team_bind_agent_activity']) assert(list.some(t => t.name === name));
+    assert.equal(list.length, 21);
+    for (const name of ['team_record_workflow', 'team_append_record', 'team_read_records', 'team_import_thread_page', 'team_bind_agent_activity','team_sync_native_history','team_get_request']) assert(list.some(t => t.name === name));
     assert.deepEqual(list[0]._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
     const resource = await c.request('resources/read', { uri: 'ui://team-workbench/panel' });
     assert.equal(resource.result.contents[0].mimeType, 'text/html;profile=mcp-app');
@@ -66,15 +72,20 @@ test('actual stdio process: discovery, app resource, real tool calls and restart
 });
 test('two independent MCP processes cannot both claim the same revision', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'team-workbench-race-'));
-  const first = client(dir), second = client(dir);
+  const first = client(dir),second=client(dir);
   try {
     const b = (await first.tool('team_create_board', { title: 'Concurrent board' })).structuredContent.board;
     await first.tool('team_create_task', { boardId: b.id, title: 'One claim only' });
+    await second.request('ping');
     const args = { boardId: b.id, taskId: 'task-1', expectedRevision: 1, actorId: 'lead', action: 'claim' };
     const results = await Promise.all([first.tool('team_update_task', args), second.tool('team_update_task', args)]);
     assert.equal(results.filter(r => !r.isError).length, 1);
     assert.equal(results.find(r => r.isError).structuredContent.error.code, 'STALE_REVISION');
-  } finally { await first.close(); await second.close(); rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    const closed=await Promise.allSettled([first.close(),...(second?[second.close()]:[])]);
+    rmSync(dir, { recursive: true, force: true });
+    const failed=closed.find(r=>r.status==='rejected');if(failed)throw failed.reason;
+  }
 });
 test('actual hook command ignores transcript/content and returns non-blocking JSON', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'team-workbench-hook-'));

@@ -11,11 +11,12 @@
     if (value !== undefined) node.textContent = value; return node;
   };
   const btn = (label, action, className = '') => { const b = el('button', className, label); b.type = 'button'; b.onclick = action; return b; };
-  const browser = new WorkbenchBrowser({ bridge, getBoard: () => state.board, openTask: (id, runId) => openDetail(id, runId), runNames });
+  const browser = new WorkbenchBrowser({ bridge, getBoard: () => state.board, openTask: (id, runId) => openDetail(id, runId), runNames, onSnapshot: apply });
   const time = stamp => new Date(stamp).toLocaleString('zh-CN', { hour12: false });
   function showError(error) { $('error').hidden = false; $('error').textContent = error.message; }
   function clearError() { $('error').hidden = true; }
   function apply(result) {
+    if(result.nativeAutoHistory)state.nativeAutoHistory=result.nativeAutoHistory;
     if (result.nativeEvents) {
       state.nativeEvents = result.nativeEvents;
       if (result.nativeEvents.enabled) $('notice').textContent = ({
@@ -78,6 +79,10 @@
     const identitySource=({'user-supplied':'用户提供','public-thread-read':'公开会话读取转报','public-subagent-activity':'公开代理活动转报','host-env':'宿主环境标识','host-spawn-receipt':'宿主启动回执'})[identity?.source] ?? '历史或手动记录';
     $('board-meta').textContent = b.rootSessionId ? `已关联：${b.rootSessionId} · 来源：${identitySource}（未独立认证）` : '尚未关联原生会话 · 成员与任务可独立记录';
     $('bind-session').textContent = b.rootSessionId ? '修改会话绑定' : '关联会话标识';
+    const automatic=b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId;
+    $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):'关'}`;
+    $('auto-history').disabled=!b.rootSessionId || (!state.nativeAutoHistory?.available && !automatic);
+    $('auto-history').title=state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':'当前后端缺少原生 Hook 日志或公开历史直读接口。';
     $('stat-total').textContent = b.tasks.length;
     $('stat-active').textContent = b.tasks.filter(t => t.status === 'in_progress').length;
     $('stat-done').textContent = b.tasks.filter(t => t.status === 'completed').length;
@@ -215,6 +220,15 @@
       confirmField(form,'确认恢复所选工作台');
     },data=>{if(data.get('confirmed')!=='on')throw new Error('请先确认恢复。');const b=state.archivedBoards.find(b=>b.id===data.get('boardId'));if(!b)throw new Error('工作台已变化，请刷新。');return call('team_archive_board',{boardId:b.id,expectedRevision:b.revision,action:'restore',confirmed:true});});
   }
+  function automaticHistory() {
+    const b=state.board;if(!b || !b.rootSessionId)return;
+    const enabled=!(b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId);
+    editor(enabled?'启用后台自动同步可见对话':'关闭后台自动同步可见对话',form=>{
+      form.append(el('p','muted',`范围：仅此工作台当前主会话 ${b.rootSessionId} 下，经公开父子关系核对的子代理。`));
+      form.append(el('p','muted',enabled?'回合停止后，后台直接保存一页用户/代理可见文本，按事件去重；不保存推理或工具正文，不向主对话发消息。现有 Hooks 的范围和信任设置不会改变。':'停止自动读取新页面，保留已保存记录。'));
+      confirmField(form,enabled?'确认对上述范围启用自动同步':'确认关闭自动同步并保留记录');
+    },data=>{if(data.get('confirmed')!=='on')throw new Error('请先确认自动同步范围。');return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId,enabled,confirmed:true});});
+  }
   function openDetail(id, runId = null) { state.activeTask = id; state.detailRunId = runId; renderDetail(id); $('task-detail').showModal(); }
   function renderDetail(id) {
     const b = state.board, t = b.tasks.find(t => t.id === id);
@@ -256,21 +270,23 @@
     if (t.status === 'pending' && !activeRun) { const claim = btn('由协调者领取', () => update('claim')); claim.disabled = !t.ready; actions.append(claim); }
     if (t.status === 'in_progress' && !activeRun) { const complete = btn('标记完成', () => update('complete'), 'primary'); complete.disabled = !t.ready; actions.append(complete, btn('释放任务', () => update('release'))); }
     if ((t.status === 'pending' && !activeRun) || activeRun?.status === 'requested') {
-      const execute = btn(activeRun?.status === 'requested' ? '重发执行请求' : '请求主代理执行', async () => {
+      const execute = btn(activeRun?.status === 'requested' ? '重发执行请求（主会话）' : '请求执行（主会话）', async () => {
         if (state.busy) return; state.busy = true; execute.disabled = true;
         try {
+          if(!bridge.canMessageLead())throw new Error('当前宿主未提供主会话执行请求能力；尚未创建执行请求。');
           let requested = activeRun?.status === 'requested' ? activeRun : null;
           if (!requested) {
             const created = await bridge.call('team_request_execution', { boardId: b.id, taskId: t.id, expectedTaskRevision: t.revision });
             requested = created.board.runs.filter(r => r.taskId === t.id).at(-1); apply(created);
           }
-          const prompt = `Execute Team Workbench run ${requested.id} on board ${b.id}, task ${t.id}. Use the team-workbench skill: read this request, start a REAL native subagent with your host collaboration tool, record the actual returned runtime reference, have the worker report start/result, collect its real result, then confirm completion. During normal dispatch/completion also follow automatic identity and history-sync protocol v1: read only the actual spawning parent activity, call team_bind_agent_activity for exact path/UUID binding, then read that resolved child and import its visible history. Check public host-tool availability; record a precise blocker if unavailable, never substitute another parent or a development child. Do not simulate an agent, start extra test agents or switch to app-server workers. Instructions: ${requested.instructions}`;
+          const prompt = `Team Workbench: execute this explicit native run. Read only team_get_request(kind=execution, requestId=runId) for stored instructions and revisions, then follow the Skill's dispatch/result/confirmation protocol. Do not start a separate app-server or substitute agent. Request: ${JSON.stringify({protocolVersion:3,boardId:b.id,runId:requested.id})}`;
           await bridge.messageLead(prompt);
           body.append(el('small', '', '执行请求已交给当前主对话；这不代表代理已经启动，请查看执行回执。'));
         } catch (e) { body.append(el('div', 'error', e.message)); }
         finally { state.busy = false; execute.disabled = false; }
       }, 'primary');
       execute.disabled = !t.ready || !bridge.canMessageLead(); actions.prepend(execute);
+      body.append(el('small','','执行会向当前主会话发送一条请求，由其原生协作工具启动代理；任务内容保存在后端，消息只携带请求标识。'));
       if (!bridge.canMessageLead()) body.append(el('small', '', '此宿主未提供当前对话消息能力；请在主对话中要求使用 Team Workbench 执行本任务。分配任务本身不会启动代理。'));
     }
     if (t.status === 'completed') actions.append(btn('重新打开', () => update('reopen')));
@@ -287,6 +303,7 @@
   }
   $('new-board').onclick = newBoard; $('welcome-create').onclick = newBoard;
   $('new-task').onclick = newTask; $('new-member').onclick = newMember; $('bind-session').onclick = bindSession; $('archive-board').onclick = archiveBoard; $('archived-boards').onclick = archivedBoards;
+  $('auto-history').onclick=automaticHistory;
   $('refresh').onclick = () => refresh({manual:true});
   $('board-select').onchange = async e => {
     state.owner = 'all'; state.status = 'all'; $('status-filter').value = 'all';
@@ -308,7 +325,7 @@
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.1 · 未连接宿主' : '插件协议已连接 · 0.5.1';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.2 · 未连接宿主' : '插件协议已连接 · 0.5.2';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

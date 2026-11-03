@@ -4,15 +4,15 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // Protocol fixture only: this is NOT an integration test against ChatGPT Desktop.
-function fixture(serverTools = {}, messaging = false) {
+function fixture(serverTools = {}, messaging = false, options = {}) {
   let listener; const requests = [], notifications = [];
   const parent = { postMessage(message) {
     if (!Object.hasOwn(message, 'id')) { notifications.push(message); return; }
     requests.push(message);
     const result = message.method === 'ui/initialize'
-      ? { protocolVersion: '2026-01-26', hostCapabilities: { ...(serverTools === false ? {} : { serverTools }), ...(messaging ? { message: { text: {} }, experimental: { 'openai/message': {} } } : {}) }, hostContext: { theme: 'dark' }, hostInfo: { name: 'Protocol fixture', version: '1' } }
+      ? { protocolVersion: '2026-01-26', hostCapabilities: { ...(serverTools === false ? {} : { serverTools }), ...(messaging ? { message: { text: {} }, experimental: { 'openai/message': {} } } : {}), ...(options.openLinks ? {openLinks:{}} : {}) }, hostContext: { theme: 'dark' }, hostInfo: { name: 'Protocol fixture', version: '1' } }
       : { content: [], structuredContent: { boards: [] } };
-    queueMicrotask(() => listener({ source: parent, data: { jsonrpc: '2.0', id: message.id, result } }));
+    queueMicrotask(() => listener({ source: parent, data: { jsonrpc: '2.0', id: message.id, ...(message.method==='ui/open-link' && options.linkError ? {error:options.linkError} : {result}) } }));
   } };
   const window = { parent, addEventListener(name, fn) { if (name === 'message') listener = fn; } };
   const context = vm.createContext({ window, document: { documentElement: { dataset: { preview: 'false' } } }, setTimeout, clearTimeout });
@@ -54,4 +54,28 @@ test('execution request never sends without advertised host messaging capability
   assert.equal(f.bridge.canMessageLead(), false);
   await assert.rejects(() => f.bridge.messageLead('No host support'), /does not advertise/);
   assert.equal(f.requests.length, 1);
+});
+
+test('native link uses advertised openLinks and exact UUID without ui/message', async () => {
+  const f=fixture({},false,{openLinks:true});await f.bridge.connect();
+  const id='00000000-0000-4000-8000-000000000801';
+  assert.equal(f.bridge.canOpenLinks(),true);
+  const result=await f.bridge.openNativeThread(id);
+  assert.equal(result.accepted,true);assert.equal(result.viewConfirmed,false);
+  assert.equal(f.requests[1].method,'ui/open-link');
+  assert.equal(f.requests[1].params.url,`codex://threads/${id}`);
+  assert(!f.requests.some(r=>r.method==='ui/message'));
+  await assert.rejects(()=>f.bridge.openNativeThread('/root/fixture'),/UUID/);
+  assert.equal(f.requests.length,2);
+});
+
+test('missing capability and host link refusal fail explicitly without a messaging fallback', async () => {
+  const missing=fixture();await missing.bridge.connect();
+  await assert.rejects(()=>missing.bridge.openNativeThread('00000000-0000-4000-8000-000000000801'),/链接/);
+  assert.equal(missing.requests.length,1);
+  const denied=fixture({},true,{openLinks:true,linkError:{code:-32000,message:'Policy violation: codex scheme denied'}});
+  await denied.bridge.connect();
+  await assert.rejects(()=>denied.bridge.openNativeThread('00000000-0000-4000-8000-000000000801'),/Policy violation: codex scheme denied/);
+  assert.equal(denied.requests.filter(r=>r.method==='ui/open-link').length,1);
+  assert(!denied.requests.some(r=>r.method==='ui/message'));
 });

@@ -1,6 +1,6 @@
 {
   "name": "team-workbench",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Native team workbench with reviewed lifecycle hooks, task execution and source-labeled session browsing.",
   "author": {
     "name": "Team Workbench contributors"

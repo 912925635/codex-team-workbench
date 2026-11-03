@@ -5,6 +5,27 @@ import {Store}from'../src/store.mjs';import{dispatch}from'../src/tools.mjs';
 import {syncNativeTopology} from '../src/native-topology.mjs';
 const root='00000000-0000-4000-8000-000000000401',child='00000000-0000-4000-8000-000000000402';
 function fixture(t){const dir=mkdtempSync(join(tmpdir(),'workbench-action-'));const s=new Store(dir);t.after(()=>{s.close();rmSync(dir,{recursive:true,force:true});});let b=s.create('Fixture');s.bind(b.id,root,b.revision);s.reportMember(b.id,{memberId:'a',name:'a',nativeId:child,evidence:'Fixture',status:'unknown'});return{s,id:b.id};}
+
+test('direct link acknowledgment is accepted, never visual success, and requires the exact recorded target',t=>{
+ const{s,id}=fixture(t);
+ assert.throws(()=>dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate',expectedNativeId:root}),{code:'ACTION_TARGET_CHANGED'});
+ assert.equal(s.read(id).hostActions,undefined);
+ const a=dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate',expectedNativeId:child}).action;
+ const args={boardId:id,actionId:a.id,expectedRevision:a.revision,nativeId:child,source:'ui/open-link',confirmed:true,result:'Fixture actual host link acknowledgment'};
+ assert.throws(()=>dispatch(s,'team_record_host_action',{...args,status:'succeeded'}),{code:'HOST_CONFIRMATION_REQUIRED'});
+ assert.throws(()=>dispatch(s,'team_record_host_action',{...args,status:'accepted',confirmed:false}),{code:'HOST_LINK_CONFIRMATION_REQUIRED'});
+ const receipt=dispatch(s,'team_record_host_action',{...args,status:'accepted'}).action;
+ assert.equal(receipt.status,'accepted');assert.equal(receipt.verification,'host-link-request-acknowledged-target-view-unverified');
+ assert(dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate',expectedNativeId:child}).action.id!==a.id);
+});
+
+test('panel cancellation has its own source and does not pretend to send a chat message or stop the worker',t=>{
+ const{s,id}=fixture(t),a=dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate'}).action;
+ const args={boardId:id,actionId:a.id,expectedRevision:1,nativeId:child,status:'cancelled',source:'panel-user-confirmation',result:'Synthetic user closed only workbench wait'};
+ assert.throws(()=>dispatch(s,'team_record_host_action',args),{code:'CONFIRMATION_REQUIRED'});
+ const result=dispatch(s,'team_record_host_action',{...args,confirmed:true}).action;
+ assert.equal(result.status,'cancelled');assert.equal(result.source,'panel-user-confirmation');assert.equal(result.verification,'panel-user-confirmed-wait-cancelled');
+});
 test('message delivery cannot succeed navigation; positive host acknowledgment is recorded once',t=>{
  const{s,id}=fixture(t),a=dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate'}).action;
  assert.throws(()=>dispatch(s,'team_request_host_action',{boardId:id,memberId:'a',kind:'navigate'}),{code:'ACTION_PENDING'});

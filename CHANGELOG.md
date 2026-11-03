@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.2 — development snapshot, installed-host acceptance pending
+
+- Direct public app-server visible-history reads for explicitly bound members,
+  verified against their complete recorded/public parent chain before body access.
+- Explicit per-root opt-in background journal watcher and asynchronous visible
+  history jobs on native stop, with persisted event dedupe and shared SQLite job leases, one history helper per backend at a time,
+  bounded retries and cancellation/rebinding guards. Existing boards remain off.
+- Paginated one-turn snapshots, text limits, explicit partial coverage, repeat-read
+  deduplication and atomic rejection when a board binding changes during a read.
+- Runtime-event refresh and saved-record refresh call MCP directly with visible
+  changed/unchanged/failure feedback; neither sends main-chat messages.
+- Native navigation first uses advertised `openLinks` and `ui/open-link` with the
+  exact `codex://threads/{UUID}` link. Host acknowledgment remains `accepted`,
+  never visual success. Refusal never triggers a hidden message or OS fallback.
+- Explicit lead-assisted navigation/history and native continuation are labeled;
+  execution/continuation prompts carry request IDs rather than repeated task text.
+  `team_get_request` returns only the exact saved request and required revisions.
+- Existing source data, plugin identity and user styles preserved. Source publication
+  does not update a running local instance, enable Hooks or grant host permissions.
+- Keep the existing GitHub marketplace and plugin names; document branch tracking,
+  marketplace refresh, installation and live connection reload as separate steps.
+
 ## 0.5.1 — development source snapshot
 
 - Native metadata-only lifecycle journal ingestion and automatic local MCP refresh.

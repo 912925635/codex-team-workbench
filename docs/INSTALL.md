@@ -21,6 +21,8 @@ is not assumed to exist on a personal-only account. This project does not invoke
 a separately installed Codex CLI or guess personal-client menu names.
 The [local source documentation](https://developers.openai.com/plugins/build/plugins)
 is a separate installation mechanism from workspace import.
+See [marketplace updates](MARKETPLACE.md) for stable identities, branch tracking
+and the difference between source sync, installation and a live MCP connection.
 
 ## Prerequisites
 

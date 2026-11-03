@@ -9,7 +9,9 @@ try {
     if (bytes > 1048576) throw new Error('Event too large');
     body += chunk;
   }
-  const raw = JSON.parse(body), store = new Store();
+  // Hook execution remains metadata-only; history jobs belong to the long-lived
+  // MCP backend, never to a lifecycle callback command.
+  const raw = JSON.parse(body), store = new Store(dataDirectory(),{autoHistory:false});
   let sessionIds;
   try { sessionIds = store.list().map(b => b.rootSessionId).filter(id => typeof id === 'string'); }
   finally { store.close(); }

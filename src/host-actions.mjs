@@ -14,6 +14,7 @@ export function requestHostAction(store, input) {
   const board = store.transact(input.boardId, b => {
     const m = b.members.find(m => m.id === input.memberId && !m.historyOnly);
     requireValue(!b.archivedAt && m && isThreadId(m.nativeId), 'EXACT_TARGET_REQUIRED', 'Select a current member with an exact native UUID');
+    requireValue(!input.expectedNativeId || input.expectedNativeId===m.nativeId, 'ACTION_TARGET_CHANGED', 'The selected native target changed; refresh before requesting');
     requireValue(!b.hostActions?.some(a => a.memberId === m.id && a.kind === input.kind && ['requested','sent'].includes(a.status)), 'ACTION_PENDING', 'This member already has a pending request');
     if (input.kind === 'resume') {
       const parent = b.members.find(p => p.id === m.parentId && !p.historyOnly);
@@ -41,12 +42,16 @@ export function recordHostAction(store, input) {
     const member = b.members.find(m => m.id === action.memberId && !m.historyOnly), cancel = input.status === 'cancelled';
     requireValue(input.nativeId === action.nativeId && (cancel || (b.rootSessionId === action.rootSessionId && member?.nativeId === action.nativeId)),
       'ACTION_TARGET_CHANGED', 'Never apply an old action to a different conversation or member');
-    requireValue(!cancel || (input.source === 'ui/message' && input.confirmed === true), 'CONFIRMATION_REQUIRED', 'Cancel only the explicitly selected workbench wait; this does not stop a host operation');
-    const sources = action.kind === 'navigate' ? ['codex-app-tools.navigate_to_codex_page','ui/message']
+    requireValue(!cancel || (['ui/message','panel-user-confirmation'].includes(input.source) && input.confirmed === true), 'CONFIRMATION_REQUIRED', 'Cancel only the explicitly selected workbench wait; this does not stop a host operation');
+    const sources = cancel ? ['ui/message','panel-user-confirmation'] : action.kind === 'navigate' ? ['codex-app-tools.navigate_to_codex_page','ui/message','ui/open-link']
       : ['collaboration.followup_task','collaboration.send_message','ui/message'];
     requireValue(sources.includes(input.source), 'ACTION_SOURCE_MISMATCH', 'Provide the actual supported operation used');
-    requireValue(input.status !== 'succeeded' || (input.source !== 'ui/message' && input.confirmed === true),
+    requireValue(input.status !== 'succeeded' || (!['ui/message','ui/open-link'].includes(input.source) && input.confirmed === true),
       'HOST_CONFIRMATION_REQUIRED', 'Message delivery alone does not confirm navigation or continuation');
+    requireValue(input.status !== 'accepted' || (action.kind === 'navigate' && input.source === 'ui/open-link' && input.confirmed === true),
+      'HOST_LINK_CONFIRMATION_REQUIRED', 'Only an actual host link acknowledgment may be accepted; the target view remains unverified');
+    requireValue(input.source !== 'ui/open-link' || ['accepted','failed'].includes(input.status),
+      'ACTION_SOURCE_MISMATCH', 'A host link response is accepted or failed, never a visual navigation confirmation');
     if (action.kind === 'resume' && input.status === 'succeeded') {
       const parent = b.members.find(p => p.id === member.parentId && !p.historyOnly);
       requireValue(member.runtimeRef === action.runtimeRef && parent?.nativeId === action.parentThreadId &&
@@ -54,7 +59,8 @@ export function recordHostAction(store, input) {
         'Record the actual spawning parent capability/agent observation and supported continuation receipt before success');
     }
     action.status = input.status;action.result = text(input.result, 'result', 2000);
-    action.source = input.source;action.verification = 'lead-relayed-host-receipt-not-server-authenticated';
+    action.source = input.source;action.verification = cancel ? 'panel-user-confirmed-wait-cancelled' : input.source === 'ui/open-link'
+      ? 'host-link-request-acknowledged-target-view-unverified' : 'lead-relayed-host-receipt-not-server-authenticated';
     action.updatedAt = new Date().toISOString();action.revision++;
     store.event(b, 'host_action_result', `${action.id}: ${action.status}`);
   });

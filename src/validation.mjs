@@ -22,6 +22,8 @@ export function validate(schema, value, path = 'arguments') {
   } else if (schema.type === 'array') {
     requireValue(Array.isArray(value) && value.length <= (schema.maxItems ?? 100), 'INVALID_ARGUMENT', `${path} must be an array of at most ${schema.maxItems ?? 100} items`);
     for (const item of value) validate(schema.items, item, path);
+  } else if (schema.type === 'boolean') {
+    requireValue(typeof value === 'boolean', 'INVALID_ARGUMENT', `${path} must be a boolean`);
   } else if (schema.type === 'integer') {
     requireValue(Number.isSafeInteger(value) && value >= (schema.minimum ?? 0), 'INVALID_ARGUMENT', `${path} must be a positive integer`);
   } else if (schema.type === 'string') {

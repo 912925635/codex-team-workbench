@@ -12,7 +12,8 @@ class WorkbenchBridge {
       if (this.pending.has(data.id)) {
         const pending = this.pending.get(data.id);
         this.pending.delete(data.id); clearTimeout(pending.timer);
-        data.error ? pending.reject(new Error(data.error.message ?? 'Host request failed')) : pending.resolve(data.result);
+        if(data.error){const error=new Error(`${data.error.message ?? 'Host request failed'}${data.error.code!==undefined?` (RPC ${data.error.code})`:''}`);error.code=data.error.code;pending.reject(error);}
+        else pending.resolve(data.result);
       } else if (data.method === 'ui/notifications/tool-result') this.onResult(data.params);
       else if (data.method === 'ui/notifications/host-context-changed') this.onContext(data.params);
       else if (data.method === 'ui/resource-teardown' && Object.hasOwn(data, 'id')) {
@@ -23,10 +24,10 @@ class WorkbenchBridge {
     };
     window.addEventListener('message', this.listener);
   }
-  request(method, params) {
+  request(method, params, timeoutMs = 10000) {
     const id = `tw-${this.nextId++}`;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('宿主未响应，请刷新后重试')); }, 10000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('宿主响应超时，结果尚未确认；请刷新已保存记录后再决定是否重试')); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
     });
@@ -35,7 +36,7 @@ class WorkbenchBridge {
     if (this.preview) { this.ready = true; return; }
     if (window.parent === window) throw new Error('请在插件面板中打开；本地预览请使用 npm run preview');
     const result = await this.request('ui/initialize', {
-      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.5.1' },
+      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.5.2' },
       appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }
     });
     this.capabilities = result.hostCapabilities ?? {};
@@ -55,7 +56,7 @@ class WorkbenchBridge {
       result = await response.json();
     } else {
       if (!this.capabilities.serverTools) throw new Error('当前宿主没有提供面板工具调用能力');
-      result = await this.request('tools/call', { name, arguments: args });
+      result = await this.request('tools/call', { name, arguments: args }, ['team_sync_native_history','team_snapshot','team_panel'].includes(name)?25000:10000);
     }
     if (result.isError) throw new Error(`${result.structuredContent?.error?.code ?? 'ERROR'}: ${result.structuredContent?.error?.message ?? result.content?.[0]?.text ?? '操作失败'}`);
     return result.structuredContent ?? JSON.parse(result.content?.find(c => c.type === 'text')?.text ?? '{}');
@@ -63,6 +64,18 @@ class WorkbenchBridge {
   canMessageLead() {
     return this.ready && !this.preview && !!this.capabilities.message?.text
       && !!this.capabilities.experimental?.['openai/message'];
+  }
+  canOpenLinks() {
+    return this.ready && !this.preview && !!this.capabilities.openLinks;
+  }
+  async openNativeThread(threadId) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(threadId ?? ''))
+      throw new Error('需要准确的完整原生线程 UUID。');
+    if (!this.canOpenLinks()) throw new Error('当前宿主未声明直接打开链接的能力；未向主对话发送消息。');
+    // A documented host request, never an OS launch or access to the host DOM.
+    const result = await this.request('ui/open-link', { url: `codex://threads/${threadId}` });
+    if (result?.isError) throw new Error(result.message ?? '宿主拒绝打开此线程链接。');
+    return { accepted: true, viewConfirmed: false };
   }
   async messageLead(message) {
     if (!this.canMessageLead()) throw new Error('Host does not advertise active-conversation messaging; copy the request into the current conversation.');

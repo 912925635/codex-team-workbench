@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { requireValue, text } from './validation.mjs';
 import { historySyncPlan } from './history-sync.mjs';
 const now = () => new Date().toISOString();
-const transcriptBoundary = { nativeAvailable: false, source: 'explicit-reports-execution-receipts-and-relayed-host-pages',
-  reason: 'No direct complete-native reader is connected. These are reported work records, execution receipts or bounded public-host pages relayed by an agent, not the complete native conversation.' };
+const transcriptBoundary = { nativeAvailable: false, source: 'reported-records-and-bounded-public-api-pages',
+  reason: 'Records and bounded visible message pages preserve their individual source. They are not a complete native transcript.' };
 
 // Display groups never replace the actual agent parent. No IDs are inferred.
 export function sessionTree(board) {
@@ -52,11 +52,12 @@ export function appendRecord(store, input) {
     observedAt: input.observedAt ? timestamp(input.observedAt) : null, source: 'reported' };
   return saveRecord(store, record);
 }
-function saveRecord(store, record) {
+export function saveRecord(store, record, beforeSave) {
   const hash = createHash('sha256').update(JSON.stringify(record)).digest('hex');
   let saved;
   store.db.exec('BEGIN IMMEDIATE');
   try {
+    beforeSave?.();
     const previous = store.db.prepare('SELECT seq, digest FROM work_records WHERE board_id=? AND record_id=?').get(record.boardId, record.recordId);
     if (previous) {
       requireValue(previous.digest === hash, 'RECORD_CONFLICT', 'Record ID already contains different content');
@@ -107,14 +108,17 @@ export function readRecords(store, input) {
   const page = rows.slice(0, limit).map(r => { const record=JSON.parse(r.payload), generation=record.bindingGeneration ?? 0;
     return {...record,seq:r.seq,historicalBinding:node.historyOnly || generation < (b.bindingGeneration ?? 0),originSessionId:record.originSessionId ?? b.bindingHistory?.find(h=>h.generation===generation)?.sessionId ?? null}; });
   const runs = b.runs.filter(r => input.nodeKind === 'workflow' ? r.workflowId === node.id : r.memberId === node.id || r.parentMemberId === node.id);
-  const lastHost = input.nodeKind === 'member' ? store.db.prepare(`SELECT payload FROM work_records WHERE board_id=? AND node_kind='member' AND node_id IN (${placeholders}) AND json_extract(payload,'$.source')='public-host-page-relayed' AND json_extract(payload,'$.hostPage.threadId')=? ORDER BY seq DESC LIMIT 1`).get(b.id,...nodeIds,node.nativeId ?? null) : null;
+  const generation=node.historyOnly ? node.historyBinding?.generation ?? 0 : b.bindingGeneration ?? 0;
+  const lastHost = input.nodeKind === 'member' ? store.db.prepare(`SELECT payload FROM work_records WHERE board_id=? AND node_kind='member' AND node_id IN (${placeholders}) AND json_extract(payload,'$.source') IN ('public-host-page-relayed','public-app-server-page') AND json_extract(payload,'$.hostPage.threadId')=? AND COALESCE(json_extract(payload,'$.bindingGeneration'),0)=? ORDER BY CASE WHEN record_id=? THEN ? ELSE COALESCE(json_extract(payload,'$.observedAt'),'') END DESC,seq DESC LIMIT 1`).get(b.id,...nodeIds,node.nativeId ?? null,generation,node.nativeHistoryRead?.recordId ?? '',node.nativeHistoryRead?.readAt ?? '') : null;
   const lastRecord=lastHost ? JSON.parse(lastHost.payload) : null;
-  const hostPage=lastRecord ? {...lastRecord.hostPage,recordId:lastRecord.recordId,readAt:lastRecord.observedAt,evidence:lastRecord.evidence} : null;
+  const hostPage=lastRecord ? {...lastRecord.hostPage,recordId:lastRecord.recordId,source:lastRecord.source,readAt:node.nativeHistoryRead?.recordId===lastRecord.recordId && node.nativeHistoryRead.readAt ? node.nativeHistoryRead.readAt : lastRecord.observedAt,evidence:lastRecord.evidence} : null;
   return { ...transcriptBoundary, boardId: b.id, nodeKind: input.nodeKind, node,
+    automaticHistory:{enabled:!!b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId,
+      state:store.autoHistory?.running?.boardId===b.id && store.autoHistory.running.memberId===node.id?'reading':store.autoHistory?.queue.some(j=>j.boardId===b.id && j.memberId===node.id)?'queued':'idle'},
     hostActions: (b.hostActions ?? []).filter(a => a.memberId === node.id).slice(-20).reverse(),
     records: page, nextCursor: rows.length > limit ? page.at(-1).seq : null,
     executions: runs.slice(-50).reverse(), executionCount: runs.length,
-    latestHostPage:hostPage, historySync:input.nodeKind==='member'?historySyncPlan(b,node,hostPage):null };
+    latestHostPage:hostPage, directHistoryAvailable:!!store.nativeHistoryReader, historySync:input.nodeKind==='member'?historySyncPlan(b,node,hostPage):null };
 }
 
 export function observation(input, previous = {}) {

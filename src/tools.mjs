@@ -4,6 +4,9 @@ import { recordWorkflow, appendRecord, readRecords, importThreadPage } from './b
 import { bindAgentActivity } from './history-sync.mjs';
 import { syncNativeEvents } from './native-events.mjs';
 import { syncNativeTopology } from './native-topology.mjs';
+import { syncNativeHistory } from './native-history.mjs';
+import { getRequest } from './requests.mjs';
+import { configureAutoHistory, ensureAutoHistoryWatch, scheduleAutoHistory, autoHistoryStatus } from './auto-history.mjs';
 import { requestHostAction, recordHostAction } from './host-actions.mjs';
 const str = (maxLength = 200) => ({ type: 'string', minLength: 1, maxLength });
 const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
@@ -14,15 +17,17 @@ const identityFields = { runtimeRef: str(300), nativeId: str(), hostId:str(), sp
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 // Version the view independently of any host-cached old tool/resource metadata.
-export const UI_URI = 'ui://team-workbench/panel/0.5.1';
+export const UI_URI = 'ui://team-workbench/panel/0.5.2';
 export const LEGACY_UI_URI = 'ui://team-workbench/panel';
 export const tools = [
   { name: 'team_panel', title: '团队工作台', description: 'Open the persistent shared task board and team map. With boardId, remember that selection if the host supplies anonymous session metadata; {} reopens it. This correlation is not a native Codex thread ID. Does not discover or control agents.',
     inputSchema: obj({ boardId: str() }), annotations: write,
     _meta: { ui: { resourceUri: UI_URI }, 'openai/ui': { entrypoints: [{ type: 'thread' }] } } },
-  {name:'team_request_host_action',description:'Record a user-requested exact-target navigation or supported continuation. Does not execute the host operation. A message acknowledgment is not success.',inputSchema:obj({boardId:str(),memberId:str(),kind:{type:'string',enum:['navigate','resume']},instructions:str(16384)},['boardId','memberId','kind']),annotations:write},
-  {name:'team_record_host_action',description:'Record the actual supported host result for one exact pending action. Success requires a positive host receipt; ui/message delivery alone cannot succeed. User-confirmed cancelled only closes the workbench wait and never stops a native operation. Remains labeled lead-relayed.',inputSchema:obj({boardId:str(),actionId:str(),expectedRevision:revision,nativeId:str(),status:{type:'string',enum:['sent','succeeded','failed','cancelled']},source:{type:'string',enum:['codex-app-tools.navigate_to_codex_page','collaboration.followup_task','collaboration.send_message','ui/message']},confirmed:{type:'boolean'},result:str(2000)},['boardId','actionId','expectedRevision','nativeId','status','source','result']),annotations:write},
-  { name: 'team_snapshot', description: 'List boards or read one board, including task revisions and source-labeled member observations. No native agent discovery.',
+  {name:'team_request_host_action',description:'Record a user-requested exact-target navigation or supported continuation. Does not execute the host operation. A message acknowledgment is not success.',inputSchema:obj({boardId:str(),memberId:str(),kind:{type:'string',enum:['navigate','resume']},instructions:str(16384),expectedNativeId:str()},['boardId','memberId','kind']),annotations:write},
+  {name:'team_get_request',description:'Read one exact execution/host-action request with its stored instructions and required target/parent revisions. Returns no unrelated tasks, messages or work history. Use for compact panel requests instead of loading an entire board.',inputSchema:obj({boardId:str(),requestId:str(),kind:{type:'string',enum:['execution','host-action']}},['boardId','requestId','kind']),annotations:readOnly},
+  {name:'team_set_history_sync',description:'After explicit user confirmation, enable/disable automatic bounded visible-text sync on native stop for this exact active board root. Watches only the existing plugin-owned metadata journal; no Hook/security configuration change, new model or main-chat message. Existing history is retained when disabled.',inputSchema:obj({boardId:str(),expectedRevision:revision,expectedRootSessionId:str(),enabled:{type:'boolean'},confirmed:{type:'boolean'}},['boardId','expectedRevision','expectedRootSessionId','enabled','confirmed']),annotations:write},
+  {name:'team_record_host_action',description:'Record one exact supported host result with its actual source. ui/open-link acknowledgment is accepted, not visual success; ui/message delivery alone cannot succeed. User-confirmed cancelled only closes the local workbench wait and never sends a message or stops a native operation.',inputSchema:obj({boardId:str(),actionId:str(),expectedRevision:revision,nativeId:str(),status:{type:'string',enum:['sent','accepted','succeeded','failed','cancelled']},source:{type:'string',enum:['codex-app-tools.navigate_to_codex_page','collaboration.followup_task','collaboration.send_message','ui/message','ui/open-link','panel-user-confirmation']},confirmed:{type:'boolean'},result:str(2000)},['boardId','actionId','expectedRevision','nativeId','status','source','result']),annotations:write},
+  { name: 'team_snapshot', description: 'List boards or read one board, including task revisions and source-labeled observations. Ingests configured plugin-owned Hook metadata and schedules only confirmed per-board background history. No model invocation or native agent control.',
     inputSchema: obj({ boardId: str() }), annotations: readOnly },
   { name: 'team_create_board', description: 'Create an empty local team board. Does not create any agent or thread.',
     inputSchema: obj({ title: str() }, ['title']), annotations: write },
@@ -63,6 +68,8 @@ export const tools = [
   { name: 'team_read_records', description: 'Page recorded work observations, relayed public-host snapshots and execution receipts for one node. Does not directly read native threads or private host sessions/databases. Complete-native access is explicitly distinguished from stored bounded snapshots.',
     inputSchema: obj({ boardId: str(), nodeKind: { type: 'string', enum: ['member', 'workflow'] }, nodeId: str(), after: natural, limit: { type: 'integer', minimum: 1 } },
       ['boardId', 'nodeKind', 'nodeId']), annotations: readOnly },
+  { name:'team_sync_native_history', description:'Read and save one bounded visible-message page directly via public app-server thread/turns/list. Exact bound root, member UUID and fresh parent metadata required; never resumes a thread or sends a main-chat message. Older-page cursors must refer to an existing direct page of this same binding. No private host files, reasoning or tool bodies.',
+    inputSchema:obj({boardId:str(),memberId:str(),expectedNativeId:str(),beforeRecordId:str()},['boardId','memberId','expectedNativeId']),annotations:write },
   { name: 'team_import_thread_page', description: 'Relay a bounded page actually returned by the public codex-app-tools.read_thread host tool for an explicitly bound member. Starts no model and calls no host API itself. Exact threadId binding required. Import selected visible messages/status/tool summaries, never reasoning or credentials. Snapshots remain marked agent-relayed, paginated/possibly truncated, not complete native transcripts.',
     inputSchema: obj({ boardId:str(), memberId:str(), recordId:str(), threadId:str(), hostId:str(), readAt:str(100), cursor:str(16384), nextCursor:str(16384), evidence:str(4000),
       turns:{type:'array',maxItems:5,items:obj({id:str(),status:str(100),items:{type:'array',maxItems:50,items:obj({id:str(),type:{type:'string',enum:['userMessage','agentMessage','commandExecution','fileChange','functionCallOutput','turnStatus']},text:str(8000)},['id','type','text'])}},['id','status','items'])} },
@@ -78,6 +85,8 @@ export function dispatch(store, name, args = {}, context = {}) {
   validate(tool.inputSchema, args);
   let board;
   switch (name) {
+    case 'team_get_request': return getRequest(store,args);
+    case 'team_set_history_sync': return configureAutoHistory(store,args);
     case 'team_request_host_action': return requestHostAction(store,args);
     case 'team_record_host_action': return recordHostAction(store,args);
     case 'team_panel': case 'team_snapshot': {
@@ -90,9 +99,12 @@ export function dispatch(store, name, args = {}, context = {}) {
       }
       const nativeTopology = boardId ? syncNativeTopology(store, boardId) : { state: 'unbound' };
       const selected = boardId ? store.view(boardId) : null;
+      ensureAutoHistoryWatch(store);
+      if(boardId)scheduleAutoHistory(store,boardId);
       return { boards: store.list(), archivedBoards: store.list({includeArchived:true}).filter(b=>b.archivedAt), board: selected?.archivedAt ? null : selected,
         nativeEvents,
         nativeTopology,
+        nativeAutoHistory:autoHistoryStatus(store,selected),
         conversationAssociation: store.sessionHash(context.anonymousSession) ? 'anonymous-host-session' : 'not-provided' };
     }
     case 'team_create_board': board = store.view(store.create(args.title)); break;
@@ -111,6 +123,7 @@ export function dispatch(store, name, args = {}, context = {}) {
     case 'team_record_workflow': board = recordWorkflow(store, args); break;
     case 'team_append_record': return appendRecord(store, args);
     case 'team_read_records': return readRecords(store, args);
+    case 'team_sync_native_history': return syncNativeHistory(store,args);
     case 'team_import_thread_page': return importThreadPage(store,args);
     case 'team_bind_agent_activity': return bindAgentActivity(store,args);
   }

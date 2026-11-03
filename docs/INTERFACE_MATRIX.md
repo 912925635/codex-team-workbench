@@ -1,4 +1,4 @@
-# Interface evidence matrix: 0.5.1
+# Interface evidence matrix: 0.5.2 local source
 
 | Path | Evidence and current behavior | Boundary |
 | --- | --- | --- |
@@ -10,8 +10,8 @@
 | Long work | Real 135-second timer stayed running/unconfirmed after freshness expired, then idle after actual stop | Freshness is confidence, not successful task completion |
 | Native topology | Public thread/read parent metadata verified actual children and grandchild | A shared root association cannot invent parent edges; this is not unrestricted thread enumeration |
 | Runtime status | Hook event and observation timestamps drive state labels | A separate control process's notLoaded is not desktop liveness or inability to resume |
-| Navigation | Native navigate_to_codex_page returned navigated=true; isolated exact-target receipt persisted | Navigation acknowledgment is not a visual UI check |
-| Visible history | Lead-mediated public read_thread pages for exactly bound nodes; bounded, paginated and source-labeled | Not full tool/reasoning transcript coverage |
+| Navigation | New direct path uses advertised openLinks / ui/open-link and exact codex thread URL; protocol and refusal handling tested | Actual current-host scheme acceptance remains unverified; earlier native tool navigated=true is a different path, not visual acceptance |
+| Visible history | Real exact authorized child read directly via public thread/turns/list after public parent-chain verification; repeat read deduplicated | Bounded visible text only, not full tool/reasoning transcript coverage; separate control process is not desktop live state |
 | Workflows | Workbench-owned grouping preserves actual agent parents separately | Not a claim of a native host workflow object |
 | GitHub import | Root Codex marketplace and portable/compatibility manifests | Verified automatic workspace sync requires an admin; personal-client import is not presumed |
 | Data update | Actual previous account-source isolated migration and old read-back preserved synthetic data | A different source identity may have a different PLUGIN_DATA root |
@@ -25,4 +25,6 @@ Primary references: [Extensions specification](https://github.com/openai/mcp-ext
 [GitHub workspace source import](https://learn.chatgpt.com/docs/enterprise/plugin-management).
 
 See [acceptance status](ACCEPTANCE_0.5.1.md) for actual versus uncompleted checks.
+[Current button audit](BUTTON_ACTIONS_0.5.2.md) distinguishes source/DOM tests,
+real read-only API evidence and the pending actual-host navigation check.
 No private host session directory, database, transcript or credential is used.

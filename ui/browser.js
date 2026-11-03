@@ -6,17 +6,17 @@
   const sources = { reported: '代理上报', manual: '手动记录', hook: '生命周期观察' };
   const time = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未提供';
   class WorkbenchBrowser {
-    constructor({ bridge, getBoard, openTask, runNames }) {
-      Object.assign(this, { bridge, getBoard, openTask, runNames }); this.folded = new Set(); this.serial = 0;
+    constructor({ bridge, getBoard, openTask, runNames, onSnapshot = () => {} }) {
+      Object.assign(this, { bridge, getBoard, openTask, runNames, onSnapshot }); this.folded = new Set(); this.serial = 0;
       $('close-node').onclick = () => this.close();
       $('node-detail').addEventListener('cancel', () => { this.serial++; this.active = null; });
     }
     close() { this.serial++; this.active = null; $('node-detail').close(); }
     canRequestContinuation(node) {
-      if (!node.runtimeRef || node.historyOnly || !this.bridge.canMessageLead?.()) return false;
+      if (!node.runtimeRef || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(node.nativeId ?? '') || node.historyOnly || !this.bridge.canMessageLead?.()) return false;
       const age=Date.now()-Date.parse(node.runtimeObservation?.observedAt ?? '');
-      const fresh=node.runtimeFresh && node.runtimeObservation?.resumeAvailable && age>=-30000 && age<=120000;
       const board=this.getBoard(), parent=board?.members?.find(m=>m.id===node.parentId && !m.historyOnly);
+      const fresh=parent?.nativeId && node.runtimeObservation?.sourceThreadId===parent.nativeId && node.runtimeFresh && node.runtimeObservation?.resumeAvailable && age>=-30000 && age<=120000;
       const topology=node.nativeTopology;
       return Boolean(fresh || (parent?.nativeId && topology?.source==='app-server.thread/read metadata' &&
         topology.rootThreadId===board.rootSessionId && topology.parentThreadId===parent.nativeId));
@@ -110,23 +110,25 @@
       const grid = el('div', 'detail-grid');
       for (const action of (page.hostActions ?? []).slice(0, 5)) fields.push([
         action.kind === 'navigate' ? '原生导航回执' : '原生续接回执',
-        `${({requested:'等待主代理执行',sent:'请求已发送，尚无执行确认',succeeded:action.kind==='navigate'?'宿主已确认导航请求':'主代理已确认续接回执',failed:'执行失败',cancelled:'已取消等待（未停止宿主操作）'})[action.status] ?? action.status}\n${action.result ?? ''}\n${action.nativeId}`
+        `${({requested:action.source==='ui/open-link'?'等待客户端响应':'等待处理',sent:'请求已发送，尚无执行确认',accepted:'客户端已接受链接请求，目标画面尚未确认',succeeded:action.kind==='navigate'?'宿主已确认导航请求':'主代理已确认续接回执',failed:'执行失败',cancelled:'已取消等待（未停止宿主操作）'})[action.status] ?? action.status}\n${action.result ?? ''}\n${action.nativeId}`
       ]);
       for (const [label, value] of fields) { const cell = el('div'); cell.append(el('span', 'detail-field', label), el('p', 'muted', value)); grid.append(cell); }
       if (node.historyOnly) body.append(el('p','notice',`历史会话成员 · 原绑定：${node.historyBinding?.sessionId ?? '未明确'}。记录保留，不参与当前绑定的同步。`));
       const visibleCount=(page.latestHostPage?.turns ?? []).flatMap(t=>t.items ?? []).filter(i=>i.type==='userMessage'||i.type==='agentMessage').length;
       const recordSummary=page.latestHostPage
-        ? `此节点已同步 ${visibleCount} 条可见消息 · 最近同步 ${time(page.latestHostPage.readAt)}。内容由主代理从公开宿主读取并转报，可能分页、截断或省略工具输出与推理。`
+        ? `此节点已同步 ${visibleCount} 条可见消息 · 最近同步 ${time(page.latestHostPage.readAt)}。${page.latestHostPage.source==='public-app-server-page'?'插件通过公开接口直接读取，未发送主对话消息。':'内容由主代理从公开宿主读取并转报。'}${page.latestHostPage.truncated?'本页已截断。':''}可能分页，省略工具输出与推理。`
         : nodeKind==='workflow' ? '此工作流显示已登记的成员和执行记录。' : node.nativeId ? '此节点已绑定原生会话，尚未同步可见对话；下方可查看已记录的执行结果。' : '此节点尚未绑定原生会话；下方可查看已记录的执行结果。';
       body.append(grid, el('p', 'notice', recordSummary));
+      if(page.automaticHistory?.enabled && ['queued','reading'].includes(page.automaticHistory.state))body.append(el('p','muted',page.automaticHistory.state==='reading'?'后台正在直接读取此节点的可见消息，无主代理往返。':'此节点已进入后台同步队列，无需向主对话发送指令。'));
       if(node.identityResolution && node.identityResolution.status!=='mapped')body.append(el('p','notice',`最近同步/关联未成功：${node.identityResolution.reason ?? node.identityResolution.status} · ${time(node.identityResolution.attemptedAt)}${page.latestHostPage ? '。下方仍保留上次成功同步的内容。' : ''}`));
+      if(node.nativeHistoryRead?.status==='failed')body.append(el('p','error',`最近直读失败：${node.nativeHistoryRead.reason} · ${time(node.nativeHistoryRead.attemptedAt)}${page.latestHostPage?'。保留上次已保存内容。':''}`));
       const actions = el('div', 'browse-reader-actions');
       const read = button(page.latestHostPage ? '查看已同步对话' : '查看已保存记录', () => (this.latestConversation ?? this.entries).scrollIntoView?.({ block: 'start' }));
-      const refresh = button('刷新记录', () => this.load(false)); actions.append(read, refresh); body.append(actions);
+      const refresh = button('刷新记录', () => this.refreshSavedRecords()); actions.append(read, refresh); body.append(actions);
       for (const action of (page.hostActions ?? []).filter(a=>['requested','sent'].includes(a.status))) {
         const cancel=button('取消等待（不停止代理）',async()=>{
           cancel.disabled=true;
-          try {await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:action.nativeId,status:'cancelled',source:'ui/message',confirmed:true,result:'用户取消工作台等待；未停止宿主操作或代理，宿主仍可能继续执行。'});await this.load(false);}
+          try {await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:action.nativeId,status:'cancelled',source:'panel-user-confirmation',confirmed:true,result:'用户取消工作台等待；未停止宿主操作或代理，宿主仍可能继续执行。'});await this.load(false);}
           catch(e){body.append(el('p','error',String(e?.message || '取消等待失败')));cancel.disabled=false;}
         });
         cancel.title='只结束这个工作台请求的等待，不中断、撤回或停止宿主操作。';actions.append(cancel);
@@ -134,31 +136,41 @@
       if (nodeKind === 'member') {
         const plan = page.historySync ?? {mode:'unavailable'};
         if (plan.mode==='unavailable' && plan.reason) body.append(el('small','',plan.reason));
-        const sync = button(plan.mode==='resolve-and-read' ? '关联并同步子代理记录' : '请求同步会话快照', () => this.requestHostPage(page, false));
-        sync.disabled = plan.mode==='unavailable' || !this.bridge.canMessageLead?.();
-        sync.title = plan.mode==='resolve-and-read' ? '由主代理读取实际发起会话的公开活动，匹配线程 ID 后再读取子代理；可能使用对话额度。' : '向当前主代理请求公开只读页；可能使用对话额度，不启动子代理。';
+        const sync = button('同步可见对话', () => this.requestHostPage(page, false));
+        sync.disabled = plan.mode!=='read' || !page.directHistoryAvailable;
+        sync.title = plan.mode!=='read' ? '需先通过真实记录关联准确线程 UUID。' : !page.directHistoryAvailable ? '当前后端未连接公开历史读取接口。' : '插件直接读取准确线程的一页可见消息，不发送主对话消息、不调用模型。';
         actions.append(sync);
+        const leadActions=el('details','activity');leadActions.append(el('summary','','需要主会话的操作（会发送一条请求）'));
+        const relaySync=button(plan.mode==='resolve-and-read'?'请求主会话关联并同步':'请求主会话同步',()=>this.requestLeadPage(page,false));
+        relaySync.disabled=plan.mode==='unavailable' || !this.bridge.canMessageLead?.();leadActions.append(relaySync);
+        actions.append(leadActions);
         if (node.id !== 'lead') {
           const openNative=button('打开对应子代理会话',()=>this.requestNativeNavigation(page));
-          openNative.disabled=plan.mode!=='read' || !this.bridge.canMessageLead?.();
-          openNative.title=plan.mode!=='read' ? '请先关联该成员的准确原生会话 UUID。' : !this.bridge.canMessageLead?.() ? '当前宿主未提供向主会话发送导航请求的能力。' : '向主会话发送导航请求，最终结果由主会话反馈。';
+          openNative.disabled=plan.mode!=='read' || !this.bridge.canOpenLinks?.();
+          openNative.title=plan.mode!=='read' ? '请先关联准确的原生线程 UUID。' : '直接请求客户端打开，不向主对话发消息；是否允许 codex 链接由宿主决定。';
           actions.append(openNative);
-          const refreshRuntime=button('更新运行状态',()=>this.requestRuntimeRefresh(page));
-          refreshRuntime.disabled=!node.runtimeRef || node.historyOnly || !this.bridge.canMessageLead?.();actions.append(refreshRuntime);
-          const resume=button('续接代理',()=>this.resumeForm(page));
+          const refreshRuntime=button('刷新运行记录',()=>this.requestRuntimeRefresh(page));
+          refreshRuntime.title='直接读取已接收的生命周期事件，不发消息、不调用模型，也不推断续接能力。';actions.append(refreshRuntime);
+          const relayOpen=button('请求主会话打开',()=>this.requestLeadNavigation(page));
+          relayOpen.disabled=plan.mode!=='read' || !this.bridge.canMessageLead?.();leadActions.append(relayOpen);
+          const resume=button('请求续接代理',()=>this.resumeForm(page));
           resume.disabled=!this.canRequestContinuation(node);
-          resume.title='发送给准确父会话；执行前检查原代理是否仍存在及支持续接，不创建替代代理。';actions.append(resume);
+          resume.title='向当前主会话发一条请求；它必须核对自己是准确父会话并检查原代理续接能力，不创建替代代理。';leadActions.append(resume);
         }
-        if (page.latestHostPage?.nextCursor) { const older = button('请求更早一页', () => this.requestHostPage(page, true)); older.disabled = sync.disabled; actions.append(older); }
+        if (page.latestHostPage?.nextCursor) {
+          const direct=page.latestHostPage.source==='public-app-server-page';
+          const older = button(direct?'读取更早一页':'请求主会话读取更早页', () => direct?this.requestHostPage(page,true):this.requestLeadPage(page,true));
+          older.disabled = direct?sync.disabled:relaySync.disabled;(direct?actions:leadActions).append(older);
+        }
         body.append(el('small', '', plan.mode==='resolve-and-read'
           ? '无需手工猜线程 ID：主代理先读取实际发起会话的子代理活动并关联，再同步可见历史；宿主未返回活动时会显示原因。请求可能使用对话额度。'
-          : plan.mode==='read' ? '同步快照会向当前主代理发请求，可能使用对话额度；浏览已保存内容不启动模型。' : '尚无实际运行引用或明确线程 ID，不能发起会话读取。'));
+          : plan.mode==='read' ? '同步可见对话、刷新记录和直接打开链接均不发送主对话消息。只有明确标注的主会话操作会发送请求。' : '尚无实际运行引用或明确线程 ID，不能发起会话读取。'));
       }
       this.latestConversation=null;
       this.latestRecordId=page.latestHostPage?.recordId;
       if (page.latestHostPage) {
         body.append(el('h3','','最近同步的可见对话'));
-        this.latestConversation=this.hostEntry({hostPage:page.latestHostPage,observedAt:page.latestHostPage.readAt,evidence:page.latestHostPage.evidence ?? '公开宿主页中继；部分可见条目。'});
+        this.latestConversation=this.hostEntry({source:page.latestHostPage.source,hostPage:page.latestHostPage,observedAt:page.latestHostPage.readAt,evidence:page.latestHostPage.evidence ?? '公开宿主页；部分可见条目。'});
         body.append(this.latestConversation);
       }
       body.append(el('h3', '', '工作记录与历史会话页'));
@@ -184,8 +196,8 @@
       for (const record of records) {
         if (this.latestRecordId && record.recordId===this.latestRecordId) continue;
         const entry = el('article', 'browse-entry');
-        if (record.historicalBinding) { const label=el('p','notice',`历史绑定记录 · 原来源：${record.originSessionId ?? '旧绑定，原记录未提供'}`); if(record.source==='public-host-page-relayed'){const host=this.hostEntry(record);host.append(label);this.entries.append(host);continue;}entry.append(label); }
-        if (record.source === 'public-host-page-relayed') {
+        if (record.historicalBinding) { const label=el('p','notice',`历史绑定记录 · 原来源：${record.originSessionId ?? '旧绑定，原记录未提供'}`); if(record.hostPage){const host=this.hostEntry(record);host.append(label);this.entries.append(host);continue;}entry.append(label); }
+        if (record.hostPage) {
           this.entries.append(this.hostEntry(record)); continue;
         }
         entry.append(el('strong', '', roles[record.role]), el('p', 'muted', `代理上报 · ${record.nodeId}\n收录于 ${time(record.receivedAt)}${record.observedAt ? ` · 事件时间（上报）${time(record.observedAt)}` : ''}`), el('p', 'browse-result', record.text));
@@ -194,7 +206,9 @@
     }
     hostEntry(record) {
       const entry=el('article','browse-entry');
-      entry.append(el('strong','','公开宿主会话快照（主代理中继）'),el('p','muted',`线程 ${record.hostPage.threadId}\n读取于 ${time(record.observedAt)} · 部分可见条目，可能截断；非服务端认证`));
+      const direct=record.source==='public-app-server-page';
+      entry.append(el('strong','',direct?'公开接口会话页（插件直读）':'公开宿主会话快照（主代理中继）'),el('p','muted',`线程 ${record.hostPage.threadId}\n读取于 ${time(record.observedAt)} · 部分可见条目${record.hostPage.truncated?'，已截断':''}${direct?'；已核对公开父子元数据':'，可能截断；非服务端认证'}`));
+      if(!record.hostPage.turns.length)entry.append(el('p','muted','公开接口返回零个 turn；未改读主会话或推断子代理不存在。'));
       for (const turn of record.hostPage.turns) {
         entry.append(el('p','muted',`Turn ${turn.id} · ${turn.status}`));
         for (const item of turn.items) entry.append(el('p','browse-result',`${item.type}\n${item.text}`));
@@ -202,19 +216,39 @@
       const evidence=el('details','activity');evidence.append(el('summary','','快照来源与范围'),el('p','muted',record.evidence));entry.append(evidence);return entry;
     }
     async requestRuntimeRefresh(page) {
-      if(this.sending || !this.active || !page.node.runtimeRef || page.node.historyOnly)return;
+      if(this.sending || !this.active)return;
       const selection=this.active;this.sending=true;
+      const before=JSON.stringify(page.node.runtimeObservation ?? null);
+      const feedback=el('p','muted','正在刷新已接收的运行事件…');$('node-body').append(feedback);
       try {
-        const request={protocolVersion:1,boardId:page.boardId,memberId:page.node.id,runtimeRef:page.node.runtimeRef};
-        await this.bridge.messageLead(`Check the current native collaboration state for this exact Team Workbench member. Establish that this is the actual spawning parent conversation and its native UUID matches the recorded parent; use supported collaboration.list_agents, verify the exact runtimeRef, and record its real status, parent UUID as sourceThreadId, current time, source and whether supported followup_task is available using team_observe_runtime with a fresh board revision. If the parent identity cannot be verified, stop without recording a state. If unavailable or missing, report unknown and no resume capability; never invent a state or start an agent. Request: ${JSON.stringify(request)}`);
-        if(this.active===selection && $('node-detail').open)$('node-body').append(el('p','muted','已请求主代理检查真实状态；完成后点击刷新记录。'));
-      }catch(e){if(this.active===selection)$('node-body').append(el('p','error',e.message));}
+        const result=await this.bridge.call('team_snapshot',{boardId:page.boardId});
+        if(this.getBoard()?.id===page.boardId)this.onSnapshot(result);
+        if(result.nativeEvents?.state==='error-reading-local-hook-journal')throw new Error('原生事件日志读取失败；保留已保存状态。');
+        if(this.active!==selection)return;
+        const read=await this.load(false);if(read?.error)throw read.error;
+        if(this.active===selection && $('node-detail').open) {
+          const current=this.getBoard()?.members?.find(m=>m.id===page.node.id);
+          const changed=before!==JSON.stringify(current?.runtimeObservation ?? null);
+          $('node-body').append(el('p','muted',`已刷新运行记录 · ${changed?'数据已更新':'无新事件'}。未向主对话发送消息，续接能力仍需实际执行前核对。`));
+        }
+      }catch(e){feedback.textContent='运行记录刷新失败。';if(this.active===selection)$('node-body').append(el('p','error',String(e?.message || '运行记录读取失败')));}
       finally{this.sending=false;}
+    }
+    async refreshSavedRecords() {
+      if(this.sending || !this.active)return;
+      this.sending=true;const selection=this.active;
+      const feedback=el('p','muted','正在刷新已保存记录…');$('node-body').append(feedback);
+      try {
+        const result=await this.load(false);
+        if(result?.error)feedback.textContent='已保存记录刷新失败。';
+        if(this.active===selection && $('node-detail').open && result && !result.error)
+          $('node-body').append(el('p','muted',`已刷新记录 · ${result.changed?'数据已更新':'数据未变化'}。未读取新的原生消息。`));
+      }finally{this.sending=false;}
     }
     resumeForm(page) {
       const body=$('node-body'), form=el('form','browse-resume-form'), input=el('textarea');
       input.required=true;input.maxLength=4000;input.placeholder='输入要交给该代理的续接任务';
-      const submit=button('确认发送续接',()=>{});submit.type='submit';
+      const submit=button('确认请求主会话续接',()=>{});submit.type='submit';
       form.append(input,submit);body.append(form);
       form.onsubmit=async e=>{
         e.preventDefault();const text=input.value?.trim();if(!text||this.sending)return;
@@ -223,10 +257,9 @@
         if(current.runtimeRef!==node.runtimeRef || current.nativeId!==node.nativeId || !this.canRequestContinuation(current)) {body.append(el('p','error','目标、父会话或能力信息已变化，请刷新节点后重试。'));return;}
         this.sending=true;submit.disabled=true;let action;
         try {
-          const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:node.id,kind:'resume',instructions:text});
+          const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:node.id,kind:'resume',instructions:text,expectedNativeId:current.nativeId});
           action=receipt.action;
-          const request={protocolVersion:2,boardId:page.boardId,memberId:node.id,nativeId:current.nativeId,runtimeRef:node.runtimeRef,parentThreadId:receipt.action.parentThreadId,instructions:text,actionId:receipt.action.id,expectedRevision:receipt.action.revision};
-          await this.bridge.messageLead(`Resume this exact Team Workbench agent only because the user explicitly submitted this request. Refresh the board, establish that this is the actual spawning parent conversation with the exact recorded parent UUID, verify member runtimeRef and parent, check collaboration.list_agents for the exact agent and supported collaboration.followup_task or send_message. Send only to that exact agent through the supported native collaboration tool; never use direct app-server input, infer another ID, or spawn a substitute. Before executing, record a fresh exact-parent collaboration capability observation using team_observe_runtime. After executing, refresh that actual observation again; then record the actual result with team_record_host_action for this exact actionId/nativeId/revision: succeeded requires confirmed=true and an actual supported collaboration receipt, not message delivery; otherwise record failed and the exact reason. Request: ${JSON.stringify(request)}`);
+          await this.bridge.messageLead(`Team Workbench: execute the user's exact pending continuation. Read only team_get_request(kind=host-action, requestId=actionId) for stored instructions and target. Verify the actual spawning parent and live original agent, record fresh capability before/after the supported operation, and persist the actual host-action receipt. Follow the Skill; never use direct app-server input or spawn a substitute. Request: ${JSON.stringify({protocolVersion:3,boardId:page.boardId,actionId:action.id,nativeId:action.nativeId})}`);
           if(this.active===selection && $('node-detail').open)body.append(el('p','muted','已请求主代理续接；请等待实际执行回执。'));
         }catch(err){
           const message=String(err?.message || '宿主续接请求发送失败');
@@ -237,6 +270,28 @@
       };
     }
     async requestNativeNavigation(page) {
+      if(this.sending || !this.active)return;
+      const plan=page.historySync,selection=this.active;
+      if(plan?.mode!=='read' || !this.bridge.canOpenLinks?.()) {
+        $('node-body').append(el('p','error','当前宿主未提供直接打开链接的能力，或节点尚无准确线程 ID。未发送主对话消息。'));return;
+      }
+      this.sending=true;let action,acknowledged=false;
+      const feedback=el('p','muted','正在请求客户端打开准确会话链接…');$('node-body').append(feedback);
+      try {
+        const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:page.node.id,kind:'navigate',expectedNativeId:plan.threadId});
+        action=receipt.action;
+        if(action.nativeId!==plan.threadId)throw new Error('线程关联已变化，请刷新节点。');
+        await this.bridge.openNativeThread(action.nativeId);acknowledged=true;
+        await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:action.nativeId,status:'accepted',source:'ui/open-link',confirmed:true,result:'客户端接受了该准确线程的链接请求；未确认目标画面。没有向主对话发送消息。'});
+        if(this.active===selection){await this.load(false);if($('node-detail').open)$('node-body').append(el('p','muted','客户端已接受打开请求；未验证目标画面。'));}
+      }catch(e){
+        feedback.textContent=acknowledged?'客户端已接受链接；回执保存失败。':'客户端打开请求失败。';
+        const message=String(e?.message || '宿主链接请求失败');
+        if(action && !acknowledged)try{await this.bridge.call('team_record_host_action',{boardId:page.boardId,actionId:action.id,expectedRevision:action.revision,nativeId:action.nativeId,status:'failed',source:'ui/open-link',result:message.slice(0,2000)});}catch{}
+        if(this.active===selection)$('node-body').append(el('p','error',acknowledged?`客户端已接受请求，但回执保存失败：${message}`:`${message}。未自动向主对话发送消息，也未使用其他启动方式。`));
+      }finally{this.sending=false;}
+    }
+    async requestLeadNavigation(page) {
       if (this.sending || !this.active) return;
       if(!this.bridge.canMessageLead?.()){$('node-body').append(el('p','error','当前宿主未提供向主会话发送导航请求的能力。'));return;}
       const plan=page.historySync, selection=this.active;
@@ -244,10 +299,10 @@
       this.sending=true;
       let action;
       try {
-        const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:page.node.id,kind:'navigate'});
+        const receipt=await this.bridge.call('team_request_host_action',{boardId:page.boardId,memberId:page.node.id,kind:'navigate',expectedNativeId:plan.threadId});
         action=receipt.action;
         const request={protocolVersion:2,boardId:page.boardId,memberId:page.node.id,threadId:plan.threadId,nativeId:plan.threadId,actionId:receipt.action.id,expectedRevision:receipt.action.revision};
-        await this.bridge.messageLead(`Open the explicitly selected Team Workbench child conversation. The user clicked the open button. Check that this exact UUID is still bound to this member. If available, call codex-app-tools.navigate_to_codex_page once with the exact threadId. Do not guess another ID, send a message to the child, or create/resume an agent. Then record the actual outcome with team_record_host_action for this exact actionId/nativeId/revision. Use succeeded with confirmed=true only if the host returned navigated=true; if unavailable or rejected, record failed with the reason. The source is codex-app-tools.navigate_to_codex_page. Message delivery alone is not success; a navigation acknowledgment is not proof of visual UI verification. Request: ${JSON.stringify(request)}`);
+        await this.bridge.messageLead(`Team Workbench: the user explicitly requests native navigation. Discover the actual available navigate_to_codex_page tool, verify this exact bound UUID and use it once; record its real receipt. Never infer another target. Follow the Skill; message delivery is not proof of navigation. Request: ${JSON.stringify(request)}`);
         if(this.active===selection && $('node-detail').open)$('node-body').append(el('p','muted','已请求主会话打开对应子代理；请等待宿主导航结果。'));
       } catch(e) {
         const message=String(e?.message || '宿主导航请求发送失败');
@@ -257,6 +312,21 @@
       finally {this.sending=false;}
     }
     async requestHostPage(page, older) {
+      if(this.sending || !this.active)return;
+      if(page.historySync?.mode!=='read' || !page.directHistoryAvailable){$('node-body').append(el('p','error','当前节点没有可用的直接读取通路。未发送主对话消息。'));return;}
+      this.sending=true;const selection=this.active;
+      const feedback=el('p','muted','正在通过公开接口读取可见对话…');$('node-body').append(feedback);
+      try {
+        const result=await this.bridge.call('team_sync_native_history',{boardId:page.boardId,memberId:page.node.id,expectedNativeId:page.historySync.threadId,
+          ...(older?{beforeRecordId:page.latestHostPage.recordId}:{})});
+        if(this.active!==selection || !$('node-detail').open)return;
+        this.renderPage(result);this.renderRecords(result.records,false);this.cursor=result.nextCursor;
+        this.more.hidden=this.cursor===null;
+        $('node-body').append(el('p','muted',`已直接读取 · ${result.sync?.duplicate?'内容未变化，读取时间已更新':result.sync?.empty?'公开接口返回空页':'可见记录已更新'}。未发送主对话消息。`));
+      }catch(e){feedback.textContent='本次直读未成功确认。';if(this.active===selection && $('node-detail').open)$('node-body').append(el('p','error',`${e.message}。已保存内容仍保留；未自动转发给主会话。`));}
+      finally{this.sending=false;}
+    }
+    async requestLeadPage(page, older) {
       if (this.sending || !this.active) return;
       this.sending = true; const selection = this.active;
       try {
@@ -267,7 +337,7 @@
           ...(plan.runtimeRef ? {runtimeRef:plan.runtimeRef,parentMemberId:plan.parentMemberId,parentThreadId:plan.parentThreadId} : {}),
           ...(plan.hostId ? {hostId:plan.hostId} : {}),
           ...(older && page.latestHostPage?.nextCursor ? {cursor:page.latestHostPage.nextCursor} : {}) };
-        await this.bridge.messageLead(`Synchronize Team Workbench member history v1. Follow the team-workbench Skill's automatic identity and history-sync protocol. Required lead tools: team_snapshot, team_report_member, team_bind_agent_activity, team_import_thread_page and public codex-app-tools.read_thread. Do not assume unavailable tools exist. For resolve-and-read, read ONLY the actual recorded spawning parent's public history, match subAgentActivity.agentPath exactly, and let team_bind_agent_activity select/register the unique UUID and return nextRead. If the parent ID is missing, only the actual spawning conversation may establish its own exact context identity; do not substitute a development/executor thread, anonymous session ID, or another parent's child. If identity/tools/history are unavailable, record that once with team_bind_agent_activity.unavailableReason or its zero-match result and stop; do not loop or spawn/resume a model. Then read ONLY the resolved/bound child, at most one turn, includeOutputs=false/maxOutputCharsPerItem=1000; verify thread.id and import selected visible items through team_import_thread_page. Omit reasoning. Mark partial/truncated coverage. A sent request is not completion. Request: ${JSON.stringify(request)}`);
+        await this.bridge.messageLead(`Team Workbench: explicit lead-assisted history request. Follow the Skill's identity/history protocol using actual available host read tools, team_bind_agent_activity and team_import_thread_page. Read only the recorded spawning parent to resolve an exact subAgentActivity path/UUID, then only the exact child. If unavailable, record that once and stop; do not substitute a development/executor thread or start a model. One turn, selected visible text, omit reasoning, mark partial coverage. Request: ${JSON.stringify(request)}`);
         if (this.active === selection && $('node-detail').open) $('node-body').append(el('p','muted','已向主代理请求只读快照；导入后点击“刷新记录”。发送成功不代表快照已读取。'));
       } catch(e) { if (this.active === selection) $('node-body').append(el('p','error',e.message)); }
       finally { this.sending = false; }
