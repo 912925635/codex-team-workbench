@@ -17,7 +17,8 @@ export function reviewPublicFiles(root) {
     if (/\b(?:Plugin_|pluginrel_|libfile_)[0-9a-f]{16,}\b/.test(body)) findings.push({path:name,reason:'private account/artifact identifier'});
     if (/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/.test(body)) findings.push({path:name,reason:'possible credential'});
     for(const id of body.match(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi)??[]) {
-      if(!id.startsWith('00000000-0000-'))findings.push({path:name,reason:'non-synthetic UUID'});
+      // RFC 6455's fixed handshake GUID is public protocol data, not a thread ID.
+      if(!id.startsWith('00000000-0000-') && id.toLowerCase()!=='258eafa5-e914-47da-95ca-c5ab0dc85b11')findings.push({path:name,reason:'non-synthetic UUID'});
     }
     files.push({path:name,sha256:createHash('sha256').update(bytes).digest('hex')});
   };

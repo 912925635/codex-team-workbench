@@ -1,6 +1,9 @@
 # Validation
 
-The current source is the 0.5.3 development snapshot, with 119 isolated tests. Run:
+The current source is 0.5.4. On the Windows development runner, 131 isolated tests
+pass and one Linux-only Unix/default-reader test is skipped (132 total, no failures).
+Cross-platform protocol fixtures pass over a Windows named pipe. No native Linux
+execution or actual Linux server acceptance is claimed. Run:
 
 ```powershell
 npm run check

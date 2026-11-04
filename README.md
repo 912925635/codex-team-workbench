@@ -4,7 +4,7 @@ A local MCP workbench for native Codex collaborators, inspired by DeepSeek Harne
 Tasks, lifecycle observations, exact parent relationships and source-labeled records
 share one conversation panel.
 
-**0.5.3 为开发验证版，修正聊天卡片的初始显示偏好。GitHub 发布不代表客户端已安装。真实历史直读已实测；客户端
+**0.5.4 为开发验证版，加入 Linux 原生历史读取适配。GitHub 发布不代表客户端已安装。Windows 真实历史直读已实测；Linux 实机及客户端
 直接跳转与完整桌面 UI 验收尚未完成。** 原稳定源码仍可追溯至提交
 [`3a66a9a`](https://github.com/912925635/codex-team-workbench/commit/3a66a9accb0a8ae9fb6dc54fefad1b45d5424d29)。
 
@@ -29,7 +29,7 @@ share one conversation panel.
 - 启动、续接及可选的主会话协助操作明确标注会发送请求；任务正文保存在后端，执行与
   续接消息只带请求标识。消息发出不等于执行成功；旧代理不在目录时不新建替身。
 
-0.5.1 基线为 92 项通过，0.5.2 为 118 项；0.5.3 加入显示回归后共 119 项通过。按钮路径、真实直读证据与未完成的宿主检查见
+0.5.3 基线为 119 项通过；0.5.4 在 Windows 回归中 131 项通过、1 项 Linux 专用测试跳过，0 项失败。按钮路径、真实直读证据与未完成的宿主检查见
 [0.5.2 按钮验收](docs/BUTTON_ACTIONS_0.5.2.md)，原生事件证据见
 [0.5.1 验收记录](docs/ACCEPTANCE_0.5.1.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
 公开仓库仅含合成测试数据，不含真实会话标识、转录、任务数据库或测试回执。
@@ -80,6 +80,8 @@ GitHub 市场的用户应更新原来源，不需要重复创建插件。跟踪 
 
 需要已有 **Node.js 24+**（使用内置 `node:sqlite`）；Windows 公开元数据读取还需要
 已有 PowerShell 7。没有 npm 依赖，不需要 API Key 或另装 Codex CLI。
+0.5.4 的 Linux 适配改用 Node 读取已有原生 Unix socket，不依赖 PowerShell；
+服务器条件、诊断和实测边界见 [Linux 同步说明](docs/LINUX.md)。
 
 ```powershell
 npm run check

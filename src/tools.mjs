@@ -17,7 +17,7 @@ const identityFields = { runtimeRef: str(300), nativeId: str(), hostId:str(), sp
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 // Version the view independently of any host-cached old tool/resource metadata.
-export const UI_URI = 'ui://team-workbench/panel/0.5.3';
+export const UI_URI = 'ui://team-workbench/panel/0.5.4';
 export const LEGACY_UI_URI = 'ui://team-workbench/panel';
 export const tools = [
   { name: 'team_panel', title: '团队工作台', description: 'Open the persistent shared task board and team map. With boardId, remember that selection if the host supplies anonymous session metadata; {} reopens it. This correlation is not a native Codex thread ID. Does not discover or control agents.',

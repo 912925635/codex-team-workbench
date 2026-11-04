@@ -82,7 +82,7 @@
     const automatic=b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId;
     $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):'关'}`;
     $('auto-history').disabled=!b.rootSessionId || (!state.nativeAutoHistory?.available && !automatic);
-    $('auto-history').title=state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':'当前后端缺少原生 Hook 日志或公开历史直读接口。';
+    $('auto-history').title=state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':state.nativeAutoHistory?.reason ?? '当前后端未提供自动同步条件的详细诊断。';
     $('stat-total').textContent = b.tasks.length;
     $('stat-active').textContent = b.tasks.filter(t => t.status === 'in_progress').length;
     $('stat-done').textContent = b.tasks.filter(t => t.status === 'completed').length;
@@ -325,7 +325,7 @@
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.3 · 未连接宿主' : '插件协议已连接 · 0.5.3';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.4 · 未连接宿主' : '插件协议已连接 · 0.5.4';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

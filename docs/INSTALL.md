@@ -31,6 +31,9 @@ npm dependencies or API keys. Windows public native-parent metadata reading uses
 an existing PowerShell 7. The native host must expose the needed Hooks,
 collaboration tools and MCP App messaging. A different Codex CLI version is not
 a substitute for those capabilities. No minimum desktop-shell build is claimed.
+The 0.5.4 Linux adapter uses existing Node and the same user's public Unix
+control socket. See [Linux requirements and test limits](LINUX.md); it does not
+install software, change permissions or create a replacement app-server.
 
 The MCP command is `node ${PLUGIN_ROOT}/src/server.mjs`, using the plugin root
 as cwd. Both manifests and the marketplace point to files in this repository.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.4 — Linux native read adapter
+
+- Register Linux readers instead of restricting native history to Windows.
+- Use the existing Unix control socket with a cached, dependency-free Node helper;
+  retain exact-parent checks, bounded visible text and cancellation.
+- Report plugin context, socket, permission and RPC conditions separately from
+  Hook journal configuration. No server settings, data or installation changed.
+- Add protocol/Hook fixtures and a Linux-only default-reader test. Actual Linux
+  server and installed UI acceptance remain pending; this source is not deployed.
+
 ## 0.5.3 — inline history-card preference
 
 - Prefer inline display for model-invoked workbench cards so a history-card

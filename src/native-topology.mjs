@@ -1,22 +1,48 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { isThreadId } from './history-sync.mjs';
+import { probePublicSocket } from './native-public-reader.mjs';
 // Keep helper source with the live MCP connection, just like the self-contained UI.
 // A native plugin update may prune old cache files before that connection reloads.
 let metadataScript = null;
 try { metadataScript = readFileSync(new URL('./read-native-metadata.ps1', import.meta.url), 'utf8'); } catch {}
+let nodeReaderScript = null;
+try { nodeReaderScript = readFileSync(new URL('./native-public-reader.mjs', import.meta.url), 'utf8'); } catch {}
+
+export const nativeReadPlatformSupported = (platform = process.platform) => ['win32', 'linux'].includes(platform);
+export function publicReaderStatus(options = {}) {
+  const platform = options.platform ?? process.platform, env = options.env ?? process.env;
+  if (!nativeReadPlatformSupported(platform)) return { available: false, code: 'PUBLIC_PLATFORM_UNSUPPORTED', message: `此后端平台尚无原生历史适配器（${platform}）。` };
+  if (!env.PLUGIN_DATA) return { available: false, code: 'PUBLIC_PLUGIN_CONTEXT_MISSING', message: '后端未提供 PLUGIN_DATA，未自动启用原生读取器。请核对插件实际执行环境。' };
+  if (platform === 'win32') return { available: !!metadataScript, code: metadataScript ? 'PUBLIC_WINDOWS_READER_CONFIGURED' : 'PUBLIC_HELPER_MISSING',
+    message: metadataScript ? 'Windows PowerShell 读取器已配置；连接将在首次读取时验证。' : 'Windows 读取器文件在启动时不可用。', connectionVerified: false };
+  if (!nodeReaderScript) return { available: false, code: 'PUBLIC_HELPER_MISSING', message: 'Node 原生读取器文件在启动时不可用。' };
+  return probePublicSocket({ ...options, platform, env });
+}
+
+function readerCommand() {
+  if (process.platform === 'win32' && metadataScript)
+    return ['pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(metadataScript, 'utf16le').toString('base64')]];
+  if (process.platform === 'linux' && nodeReaderScript)
+    return [process.execPath, ['--input-type=module', '--eval', nodeReaderScript + '\nawait runPublicReadCli();']];
+  throw Object.assign(new Error('Supported public read helper unavailable for this backend platform'), { code: 'PUBLIC_PLATFORM_UNSUPPORTED' });
+}
+function readerFailure(data, error) {
+  return Object.assign(new Error(data?.message?.slice(0, 1000) || (error ? `Public reader command unavailable (${error.code ?? 'process error'})` : 'Public app-server read connection unavailable')),
+    { code: data?.error ?? error?.code ?? 'PUBLIC_READ_UNAVAILABLE' });
+}
 
 export function readBoundPublic(request) {
   const { threadIds } = request;
   if (!threadIds.length || threadIds.length > 100 || !threadIds.every(isThreadId)) throw new Error('Invalid metadata scope');
-  if (!metadataScript) throw new Error('Public metadata helper was unavailable at startup');
-  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(metadataScript, 'utf16le').toString('base64')], {
+  const [command, args] = readerCommand();
+  const result = spawnSync(command, args, {
     input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 20000, maxBuffer: 1048576
   });
   let data;
   try { data = JSON.parse(result.stdout); } catch {}
   if (result.status !== 0 || !data?.connected || !Array.isArray(data.threads))
-    throw new Error(data?.message?.slice(0, 1000) || 'Public app-server read connection unavailable');
+    throw readerFailure(data, result.error);
   return { ...data, threads: data.threads.filter(row => threadIds.includes(row.id)) };
 }
 
@@ -28,23 +54,24 @@ export function readNativeMetadata(threadIds) {
 // while an event-triggered background history page is being fetched.
 export function readBoundPublicAsync(request, { signal } = {}) {
   const { threadIds }=request;
-  if(!threadIds?.length || threadIds.length>100 || !threadIds.every(isThreadId) || !metadataScript)
+  if(!threadIds?.length || threadIds.length>100 || !threadIds.every(isThreadId))
     return Promise.reject(new Error('Invalid or unavailable public read scope'));
+  let command,args;try{[command,args]=readerCommand();}catch(error){return Promise.reject(error);}
   return new Promise((resolve,reject)=>{
     let output='',bytes=0,settled=false;
-    const child=spawn('pwsh',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(metadataScript,'utf16le').toString('base64')],
+    const child=spawn(command,args,
       {windowsHide:true,stdio:['pipe','pipe','pipe']});
     const finish=(error,data)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);error?reject(error):resolve(data);};
     const abort=()=>{child.kill();finish(new Error('Public history read cancelled'));};
     const timer=setTimeout(()=>{child.kill();finish(new Error('Public history reader timed out'));},20000);
     child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{bytes+=Buffer.byteLength(chunk);if(bytes>1048576){child.kill();finish(new Error('Public reader output exceeded limit'));}else output+=chunk;});
     child.stderr.on('data',()=>{}); // Drain diagnostics; never retain raw host content.
-    child.on('error',error=>finish(error));
-    child.stdin.on('error',error=>finish(error));
+    child.on('error',error=>finish(readerFailure(null,error)));
+    child.stdin.on('error',error=>{if(error.code!=='EPIPE')finish(readerFailure(null,error));});
     child.on('close',code=>{
       if(settled)return;
       let data;try{data=JSON.parse(output);}catch{}
-      if(code!==0 || !data?.connected || !Array.isArray(data.threads))finish(new Error(data?.message?.slice(0,1000)||'Public app-server read connection unavailable'));
+      if(code!==0 || !data?.connected || !Array.isArray(data.threads))finish(readerFailure(data));
       else finish(null,{...data,threads:data.threads.filter(row=>threadIds.includes(row.id))});
     });
     signal?.addEventListener('abort',abort,{once:true});
@@ -79,6 +106,10 @@ export function topologyPlan(rootId, members, metadata) {
 
 export function syncNativeTopology(store, boardId) {
   if (!store.nativeMetadataReader) return { state: 'not-connected' };
+  if (store.nativeMetadataReader === readNativeMetadata) {
+    const status=publicReaderStatus();
+    if(!status.available)return {state:'public-metadata-unavailable',reason:status.code};
+  }
   const b = store.read(boardId);
   if (b.archivedAt || !isThreadId(b.rootSessionId)) return { state: 'unbound-or-archived' };
   const members = b.members.filter(m => !m.historyOnly && m.id !== 'lead' && isThreadId(m.nativeId));

@@ -15,12 +15,19 @@ function runtime(store) {
 }
 export function autoHistoryStatus(store,board) {
   const r=runtime(store);
-  return {available:store.autoHistoryEnabled!==false && !!store.nativeHistoryAsyncReader && !!store.nativeEventJournal,enabled:!!board && !!enabled(board),
+  const publicHistory=store.nativeReaderStatus?.() ?? {available:!!store.nativeHistoryAsyncReader,code:'PUBLIC_READER_NOT_CONFIGURED',message:'后端没有配置公开历史读取器。'};
+  const hookJournal={configured:!!store.nativeEventJournal,state:store.nativeEventJournal?'configured':'not-configured'};
+  const available=store.autoHistoryEnabled!==false && !!store.nativeHistoryAsyncReader && hookJournal.configured && publicHistory.available;
+  const reason=store.autoHistoryEnabled===false?'此后端未启用自动历史任务。'
+    : !hookJournal.configured?'未配置插件自己的 Hook 日志；这与原生历史读取器是两个条件。'
+    : !store.nativeHistoryAsyncReader?'后端没有配置原生历史异步读取器。'+publicHistory.message
+    : !publicHistory.available?publicHistory.message:'已具备读取条件；仍需真实 Hook 回调和准确的线程权限。';
+  return {available,enabled:!!board && !!enabled(board),reason,publicHistory,hookJournal,
     state:r.watchState,pending:r.queue.length+(r.running?1:0)};
 }
 export function configureAutoHistory(store,input) {
   requireValue(input.confirmed===true,'CONFIRMATION_REQUIRED','Confirm this workbench scoped visible-text collection before changing automatic sync');
-  if(input.enabled)requireValue(store.nativeHistoryAsyncReader && store.nativeEventJournal,'PUBLIC_HISTORY_UNAVAILABLE','Automatic history needs an existing Hook journal and supported direct public reader');
+  if(input.enabled){const status=autoHistoryStatus(store);requireValue(status.available,'PUBLIC_HISTORY_UNAVAILABLE',status.reason);}
   const board=store.transact(input.boardId,b=>{
     requireValue(!b.archivedAt && b.revision===input.expectedRevision,'STALE_REVISION','Refresh the current active board before changing automatic sync');
     requireValue(isThreadId(b.rootSessionId) && b.rootSessionId===input.expectedRootSessionId,'THREAD_BINDING_REQUIRED','Confirm this exact bound root UUID');
@@ -65,7 +72,7 @@ export function ensureAutoHistoryWatch(store) {
 
 export function scheduleAutoHistory(store,boardId) {
   const r=runtime(store);
-  if(r.closed || store.autoHistoryEnabled===false || !store.nativeHistoryAsyncReader)return;
+  if(r.closed || store.autoHistoryEnabled===false || !store.nativeHistoryAsyncReader || store.nativeReaderStatus?.().available===false)return;
   const b=store.read(boardId);if(!enabled(b))return;
   for(const m of b.members.filter(stopped)) {
     const key=eventKey(b,m),id=`${b.id}:${m.id}:${key}`,attempt=r.attempts.get(id);

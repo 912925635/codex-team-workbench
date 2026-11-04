@@ -1,6 +1,6 @@
 {
   "name": "team-workbench",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "type": "module",
   "description": "Local MCP team workspace with reported session trees, workflow groups and paginated work records.",

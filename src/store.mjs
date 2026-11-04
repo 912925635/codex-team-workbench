@@ -8,7 +8,7 @@ import { requireValue, text, BoardError } from './validation.mjs';
 import { sessionTree, observation } from './browse.mjs';
 import { isThreadId } from './history-sync.mjs';
 import { runtimeView } from './runtime-view.mjs';
-import { readNativeMetadata } from './native-topology.mjs';
+import { readNativeMetadata, nativeReadPlatformSupported, publicReaderStatus } from './native-topology.mjs';
 import { readNativeHistory, readNativeHistoryAsync } from './native-history.mjs';
 import { ensureAutoHistoryWatch, stopAutoHistory } from './auto-history.mjs';
 
@@ -44,11 +44,14 @@ export class Store {
     this.nativeEventJournal = options.nativeEventJournal ?? (process.env.TEAM_WORKBENCH_NATIVE_EVENTS ||
       (process.env.PLUGIN_DATA ? join(directory, 'native-events-probe.sqlite') : null));
     this.nativeMetadataReader = options.nativeMetadataReader ??
-      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeMetadata : null);
+      (process.env.PLUGIN_DATA && nativeReadPlatformSupported() ? readNativeMetadata : null);
     this.nativeHistoryReader = options.nativeHistoryReader ??
-      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeHistory : null);
+      (process.env.PLUGIN_DATA && nativeReadPlatformSupported() ? readNativeHistory : null);
     this.nativeHistoryAsyncReader = options.nativeHistoryAsyncReader ??
-      (process.env.PLUGIN_DATA && process.platform === 'win32' ? readNativeHistoryAsync : null);
+      (process.env.PLUGIN_DATA && nativeReadPlatformSupported() ? readNativeHistoryAsync : null);
+    this.nativeReaderStatus = options.nativeReaderStatus ?? (options.nativeHistoryReader || options.nativeHistoryAsyncReader
+      ? () => ({ available: true, code: 'PUBLIC_READER_PROVIDED', message: '已配置显式读取器；首次读取验证其连接与权限。', connectionVerified: false })
+      : () => publicReaderStatus());
     this.autoHistoryRetryMs=options.autoHistoryRetryMs;
     mkdirSync(directory, { recursive: true });
     this.db = new DatabaseSync(join(directory, 'workbench.sqlite'));

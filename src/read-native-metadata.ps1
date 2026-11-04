@@ -38,7 +38,7 @@ public static class WorkbenchMetadataReader {
         doc.Dispose(); // Unrequested notifications are neither retained nor printed.
       }
     }
-    await Send(new {id=1,method="initialize",@params=new {clientInfo=new {name="team_workbench_readonly",version="0.5.2"}}});
+    await Send(new {id=1,method="initialize",@params=new {clientInfo=new {name="team_workbench_readonly",version="0.5.4"}}});
     using var init=await Response(1);
     if(init.RootElement.TryGetProperty("error",out var initErr)) throw new IOException("initialize RPC error " + initErr.GetProperty("code").GetRawText());
     await Send(new {method="initialized",@params=new {}});

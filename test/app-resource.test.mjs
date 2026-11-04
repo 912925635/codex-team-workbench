@@ -13,7 +13,7 @@ function fixture(t, { missingUi = false, automaticHistory = false } = {}) {
   for (const name of ['src', 'ui']) cpSync(join(root, name), join(dir, name), { recursive: true });
   if (missingUi) rmSync(join(dir, 'ui'), { recursive: true });
   const child = spawn(process.execPath, [join(dir, 'src/server.mjs')], {
-    cwd: dir, env: { ...process.env, TEAM_WORKBENCH_DATA: join(dir, 'isolated-data'),...(automaticHistory?{PLUGIN_DATA:join(dir,'isolated-plugin-data')}:{}) },
+    cwd: dir, env: { ...process.env, CODEX_HOME: join(dir, 'isolated-codex-home'), TEAM_WORKBENCH_DATA: join(dir, 'isolated-data'),...(automaticHistory?{PLUGIN_DATA:join(dir,'isolated-plugin-data')}:{}) },
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map(); let next = 0, stderr = '';
   child.stderr.on('data', d => { stderr += d; });
@@ -47,7 +47,7 @@ test('inline history cards preserve fullscreen support and the manual thread ent
   const tool = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   assert.deepEqual(tool._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
   const uris = [tool._meta.ui.resourceUri, 'ui://team-workbench/panel',
-    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', tool._meta.ui.resourceUri];
+    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', tool._meta.ui.resourceUri];
   for (const uri of uris) {
     const response = await c.request('resources/read', { uri });
     assert.equal(response.error, undefined);
@@ -73,7 +73,7 @@ test('a running MCP connection retains its complete UI after an upgrade prunes i
   const before = (await resource(c)).result.contents[0];
   assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
-  for(const version of ['0.4.2','0.5.1','0.5.2']){
+  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3']){
     const oldUri=`ui://team-workbench/panel/${version}`;
     const alias=await c.request('resources/read',{uri:oldUri});
     assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
@@ -113,7 +113,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   const c = fixture(t,{automaticHistory:true}); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.3');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.4');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
