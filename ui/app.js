@@ -325,7 +325,7 @@
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.2 · 未连接宿主' : '插件协议已连接 · 0.5.2';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.3 · 未连接宿主' : '插件协议已连接 · 0.5.3';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

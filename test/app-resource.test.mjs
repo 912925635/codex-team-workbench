@@ -42,12 +42,38 @@ async function initialize(c) {
 }
 const resource = c => c.request('resources/read', { uri: 'ui://team-workbench/panel' });
 
+test('inline history cards preserve fullscreen support and the manual thread entrypoint', async t => {
+  const c = fixture(t); await initialize(c);
+  const tool = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
+  assert.deepEqual(tool._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
+  const uris = [tool._meta.ui.resourceUri, 'ui://team-workbench/panel',
+    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', tool._meta.ui.resourceUri];
+  for (const uri of uris) {
+    const response = await c.request('resources/read', { uri });
+    assert.equal(response.error, undefined);
+    const content = response.result.contents[0];
+    assert.equal(content.uri, uri);
+    assert.equal(content.mimeType, 'text/html;profile=mcp-app');
+    assert.equal(content._meta['openai/ui'].preferredDisplayMode, 'inline',
+      'remounted tool-result cards must not request fullscreen as their initial mode');
+    assert(content._meta['openai/ui'].availableDisplayModes.includes('fullscreen'),
+      'explicit thread entrypoint must retain fullscreen support');
+    assert(content._meta['openai/ui'].availableDisplayModes.includes('inline'));
+    assert.deepEqual(content._meta.ui.csp, { connectDomains: [], resourceDomains: [] });
+  }
+  // The host invokes a thread entrypoint with {} and chooses fullscreen itself.
+  const opened = await c.request('tools/call', { name: 'team_panel', arguments: {} });
+  assert.equal(opened.result.isError, undefined);
+  assert.deepEqual(opened.result.structuredContent.boards, [],
+    'resource reads and opening an empty entrypoint must not create workbench data');
+});
+
 test('a running MCP connection retains its complete UI after an upgrade prunes its old UI directory', async t => {
   const c = fixture(t); await initialize(c);
   const before = (await resource(c)).result.contents[0];
   assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
-  for(const version of ['0.4.2','0.5.1']){
+  for(const version of ['0.4.2','0.5.1','0.5.2']){
     const oldUri=`ui://team-workbench/panel/${version}`;
     const alias=await c.request('resources/read',{uri:oldUri});
     assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
@@ -87,7 +113,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   const c = fixture(t,{automaticHistory:true}); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.2');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.3');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.3 — inline history-card preference
+
+- Prefer inline display for model-invoked workbench cards so a history-card
+  remount does not request fullscreen. Keep fullscreen support and the manual
+  thread entrypoint; the host chooses fullscreen for explicit entrypoints.
+- Real stdio resource regression covers current/legacy URIs, repeated reads,
+  unchanged CSP and entrypoint invocation with empty arguments. Actual desktop
+  scroll/remount behavior remains unverified. Publication does not install the patch.
+- Bump the plugin, MCP/UI versions and current resource URI together; older
+  resource URI aliases remain compatible with a newly connected server.
+
 ## 0.5.2 — development snapshot, installed-host acceptance pending
 
 - Direct public app-server visible-history reads for explicitly bound members,

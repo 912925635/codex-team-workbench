@@ -7,5 +7,6 @@ export function appHtml(preview = false) {
 }
 export const resourceMeta = {
   ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: false },
-  'openai/ui': { availableDisplayModes: ['inline', 'fullscreen'], preferredDisplayMode: 'fullscreen' }
+  // History-card remounts stay inline; the host still opens manual entrypoints fullscreen.
+  'openai/ui': { availableDisplayModes: ['inline', 'fullscreen'], preferredDisplayMode: 'inline' }
 };

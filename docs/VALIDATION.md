@@ -1,6 +1,6 @@
 # Validation
 
-The current source is the 0.5.2 development snapshot. Run:
+The current source is the 0.5.3 development snapshot, with 119 isolated tests. Run:
 
 ```powershell
 npm run check
