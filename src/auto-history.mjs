@@ -23,16 +23,23 @@ export function autoHistoryStatus(store,board) {
     : !store.nativeHistoryAsyncReader?'后端没有配置原生历史异步读取器。'+publicHistory.message
     : !publicHistory.available?publicHistory.message:'已具备读取条件；仍需真实 Hook 回调和准确的线程权限。';
   return {available,enabled:!!board && !!enabled(board),reason,publicHistory,hookJournal,
-    state:r.watchState,pending:r.queue.length+(r.running?1:0)};
+    state:r.watchState,pending:r.queue.length+(r.running?1:0),...(r.watchError?{error:r.watchError}:{})};
 }
 export function configureAutoHistory(store,input) {
   requireValue(input.confirmed===true,'CONFIRMATION_REQUIRED','Confirm this workbench scoped visible-text collection before changing automatic sync');
   if(input.enabled){const status=autoHistoryStatus(store);requireValue(status.available,'PUBLIC_HISTORY_UNAVAILABLE',status.reason);}
   const board=store.transact(input.boardId,b=>{
     requireValue(!b.archivedAt && b.revision===input.expectedRevision,'STALE_REVISION','Refresh the current active board before changing automatic sync');
+    if (!b.rootSessionId && !input.enabled && input.expectedRootSessionId === '' && b.syncInitialization?.requested) {
+      b.syncInitialization = {...b.syncInitialization, requested:false, state:'cancelled', updatedAt:new Date().toISOString()};
+      store.event(b,'automatic_history_setting','Cancelled pending initialization; no history was collected');
+      return;
+    }
     requireValue(isThreadId(b.rootSessionId) && b.rootSessionId===input.expectedRootSessionId,'THREAD_BINDING_REQUIRED','Confirm this exact bound root UUID');
     b.nativeHistorySync={enabled:input.enabled,rootThreadId:b.rootSessionId,generation:(b.nativeHistorySync?.generation??0)+1,
       updatedAt:new Date().toISOString(),coverage:'one-latest-turn-visible-text-on-native-stop'};
+    if (b.syncInitialization) b.syncInitialization = {...b.syncInitialization, requested:false,
+      state:input.enabled?'enabled':'cancelled', rootThreadId:b.rootSessionId, updatedAt:b.nativeHistorySync.updatedAt};
     if(input.enabled)store.db.prepare("DELETE FROM native_history_claims WHERE board_id=? AND state='pending'").run(b.id);
     store.event(b,'automatic_history_setting',input.enabled?'Enabled for the exact current board root':'Disabled; saved history retained');
   });
@@ -58,9 +65,13 @@ export function ensureAutoHistoryWatch(store) {
       clearTimeout(r.debounce);
       r.debounce=setTimeout(()=>{
         if(r.closed)return;
+        r.watchState='watching-plugin-journal';delete r.watchError;
         for(const item of store.list()) {
           if(!enabled(store.read(item.id)))continue;
-          try{syncNativeEvents(store,item.id);syncNativeTopology(store,item.id);scheduleAutoHistory(store,item.id);}catch{r.watchState='journal-refresh-failed';}
+          try{syncNativeEvents(store,item.id);syncNativeTopology(store,item.id);scheduleAutoHistory(store,item.id);}catch(error){
+            r.watchState='journal-refresh-failed';
+            r.watchError={code:String(error?.code??'JOURNAL_REFRESH_FAILED').slice(0,100),message:String(error?.message??'Journal refresh failed').slice(0,300)};
+          }
         }
       },100);r.debounce.unref();
     });

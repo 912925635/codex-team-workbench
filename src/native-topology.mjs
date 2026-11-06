@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isThreadId } from './history-sync.mjs';
 import { probePublicSocket } from './native-public-reader.mjs';
 // Keep helper source with the live MCP connection, just like the self-contained UI.
@@ -37,7 +38,7 @@ export function readBoundPublic(request) {
   if (!threadIds.length || threadIds.length > 100 || !threadIds.every(isThreadId)) throw new Error('Invalid metadata scope');
   const [command, args] = readerCommand();
   const result = spawnSync(command, args, {
-    input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 20000, maxBuffer: 1048576
+    input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, cwd: homedir(), timeout: 20000, maxBuffer: 1048576
   });
   let data;
   try { data = JSON.parse(result.stdout); } catch {}
@@ -60,7 +61,7 @@ export function readBoundPublicAsync(request, { signal } = {}) {
   return new Promise((resolve,reject)=>{
     let output='',bytes=0,settled=false;
     const child=spawn(command,args,
-      {windowsHide:true,stdio:['pipe','pipe','pipe']});
+      {windowsHide:true,cwd:homedir(),stdio:['pipe','pipe','pipe']});
     const finish=(error,data)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);error?reject(error):resolve(data);};
     const abort=()=>{child.kill();finish(new Error('Public history read cancelled'));};
     const timer=setTimeout(()=>{child.kill();finish(new Error('Public history reader timed out'));},20000);

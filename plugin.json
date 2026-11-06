@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "team-workbench",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Native team workbench with reviewed lifecycle hooks, task execution and source-labeled session browsing.",
   "author": {
     "name": "Team Workbench contributors"

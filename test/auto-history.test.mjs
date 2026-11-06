@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from '../src/store.mjs';
@@ -109,4 +110,18 @@ test('metadata-only Hook Store does not start a watcher/history job even when th
   const hookStore=new Store(f.directory,{autoHistory:false,nativeEventJournal:f.store.nativeEventJournal,nativeHistoryAsyncReader:async()=>{calls++;return page();}});
   try{assert.equal(hookStore.autoHistory,undefined);assert.equal(autoHistoryStatus(hookStore,hookStore.read(f.id)).available,false);scheduleAutoHistory(hookStore,f.id);await new Promise(r=>setTimeout(r,10));assert.equal(calls,0);}
   finally{hookStore.close();}
+});
+
+
+test('journal refresh errors are reported and a later successful watch refresh clears the stale failure',async t=>{
+  const f=fixture(t),path=f.store.nativeEventJournal;
+  let db=new DatabaseSync(path);db.exec('CREATE TABLE pending_fixture (value TEXT)');db.close();
+  f.configure(true);utimesSync(path,new Date(),new Date());
+  await waitFor(()=>autoHistoryStatus(f.store).state==='journal-refresh-failed');
+  assert.match(autoHistoryStatus(f.store).error.message,/no such table: events/);
+  db=new DatabaseSync(path);db.exec('CREATE TABLE events (seq INTEGER PRIMARY KEY, payload TEXT NOT NULL, observed_at TEXT NOT NULL)');db.close();
+  utimesSync(path,new Date(),new Date());
+  await waitFor(()=>autoHistoryStatus(f.store).state==='watching-plugin-journal');
+  assert.equal(autoHistoryStatus(f.store).error,undefined);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM work_records').get().n,0);
 });

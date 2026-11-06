@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, rmdirSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { readPublicRequest, controlSocketPath, probePublicSocket } from '../src/native-public-reader.mjs';
-import { nativeReadPlatformSupported, publicReaderStatus } from '../src/native-topology.mjs';
+import { nativeReadPlatformSupported, publicReaderStatus, readBoundPublic, readBoundPublicAsync } from '../src/native-topology.mjs';
 import { Store } from '../src/store.mjs';
 import { dispatch } from '../src/tools.mjs';
 import { autoHistoryStatus } from '../src/auto-history.mjs';
@@ -199,6 +199,24 @@ test('automatic-sync diagnostics distinguish an unavailable endpoint and preserv
   available=true;configure(true);available=false;
   status=autoHistoryStatus(store,store.read(b.id));assert.equal(status.enabled,true);assert.equal(status.available,false);assert.equal(status.reason,'Fixture socket missing');assert.equal(calls,0);
   configure(false);assert.equal(autoHistoryStatus(store,store.read(b.id)).enabled,false);
+});
+
+test('Linux cached readers survive a removed backend working directory', {skip:process.platform!=='linux'},async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'workbench-reader-cwd-')),priorCwd=process.cwd(),priorHome=process.env.CODEX_HOME;
+  let server;
+  try{
+    process.env.CODEX_HOME=join(dir,'home');
+    server=await backgroundFixture(null,{socketPath:controlSocketPath()});
+    const removed=join(dir,'removed-cache');mkdirSync(removed);process.chdir(removed);rmdirSync(removed);
+    const synchronous=readBoundPublic(input),asynchronous=await readBoundPublicAsync(input);
+    assert.equal(synchronous.threadId,child);assert.equal(asynchronous.threadId,child);
+    assert.equal(synchronous.turns[0].items[1].text,'Visible fixture result');
+    assert.equal(asynchronous.turns[0].items[1].text,'Visible fixture result');
+  }finally{
+    process.chdir(priorCwd);await server?.close();
+    if(priorHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=priorHome;
+    assert(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});
+  }
 });
 
 test('Linux default readers use the actual Unix control path for sync, async and automatic Hook history', {skip:process.platform!=='linux'},async()=>{

@@ -13,7 +13,14 @@ history reads require no lead response.
 
 1. Call `team_snapshot` to list boards. Select the board explicitly associated
    with the current task; do not silently pick the latest board belonging to
-   another conversation. Create an empty board with `team_create_board` if needed.
+   another conversation. For a new workbench, establish the originating main
+   conversation's exact UUID from its own trusted host context or an exact public
+   read. Pass it as `sessionId` to `team_create_board`, with its source/evidence.
+   When the user requests or confirms automatic visible-text synchronization,
+   also pass `automaticHistory:true, confirmed:true`: creation completes binding
+   and sync together. If identity is not yet available, the same explicit opt-in
+   can wait for the lead identity; never substitute anonymous metadata or another
+   conversation's UUID.
 2. Open `team_panel` with the chosen `boardId` when the host supports the view.
    Without a view, all task tools remain usable and return structured data.
 3. Create tasks with concise titles and dependency IDs. A blocked task cannot be
@@ -23,6 +30,15 @@ history reads require no lead response.
    identifier with `team_report_member`. This is a **reported** record, not native
    discovery. Do not invent a worker, agent ID, thread ID, running state, thread
    URL, or resumability. Record `unknown` when the state is unknown.
+   Register the actual main `lead` UUID before dispatching children. An explicitly
+   sourced `host-env`, `public-thread-read`, or `user-supplied` lead identity now
+   completes an unbound board's first association; a previously confirmed pending
+   automatic-sync choice is enabled at the same time. Child reports cannot bind
+   the board. Do not use an inherited worker environment as the main identity.
+   Never finish setup with a known lead UUID but an unbound workbench. Existing
+   unbound boards can use `team_bind_session` with `automaticHistory:true,
+   confirmed:true` after the user authorizes that board's synchronization. An
+   identity association alone does not authorize visible-text collection.
 5. Read a fresh snapshot before updating. Include `expectedRevision`, the task's
    revision, and `actorId`, the declared workflow member. On `STALE_REVISION`, read
    again, assess the new state and retry only if the intended action still fits.

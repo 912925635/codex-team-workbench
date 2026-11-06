@@ -47,7 +47,7 @@ test('inline history cards preserve fullscreen support and the manual thread ent
   const tool = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   assert.deepEqual(tool._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
   const uris = [tool._meta.ui.resourceUri, 'ui://team-workbench/panel',
-    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', tool._meta.ui.resourceUri];
+    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', 'ui://team-workbench/panel/0.5.4', tool._meta.ui.resourceUri];
   for (const uri of uris) {
     const response = await c.request('resources/read', { uri });
     assert.equal(response.error, undefined);
@@ -73,7 +73,7 @@ test('a running MCP connection retains its complete UI after an upgrade prunes i
   const before = (await resource(c)).result.contents[0];
   assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
-  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3']){
+  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3','0.5.4']){
     const oldUri=`ui://team-workbench/panel/${version}`;
     const alias=await c.request('resources/read',{uri:oldUri});
     assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
@@ -113,7 +113,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   const c = fixture(t,{automaticHistory:true}); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.4');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.5');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
@@ -227,4 +227,13 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   assert.equal(ids['workspace'].hidden,false);assert.equal(methods.filter(m=>m==='ui/message').length,1);
   ids['new-board'].onclick();fieldByName('title').value='Another direct board fixture';await submit();
   assert.equal(ids['board-title'].textContent,'Another direct board fixture');assert.equal(methods.filter(m=>m==='ui/message').length,1);
+  assert.equal(ids['auto-history'].textContent,'自动同步对话：待关联');
+  assert.equal(ids['auto-history'].disabled,false,'Pending initialization must have a usable setup/cancel entrypoint');
+  ids['auto-history'].onclick();
+  assert.equal(ids['editor'].open,true);assert(fieldByName('sessionId'));
+  fieldByName('action').value='cancel';fieldByName('confirmed').checked=true;await submit();
+  assert.equal(ids['auto-history'].textContent,'自动同步对话：关');
+  const created=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:ids['board-select'].value}})).result.structuredContent.board;
+  assert.equal(created.rootSessionId,null);assert.equal(created.syncInitialization.requested,false);
+  assert.equal(methods.filter(m=>m==='ui/message').length,1,'Creation and initialization never send an implicit main-chat message');
 });

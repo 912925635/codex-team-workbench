@@ -80,9 +80,11 @@
     $('board-meta').textContent = b.rootSessionId ? `已关联：${b.rootSessionId} · 来源：${identitySource}（未独立认证）` : '尚未关联原生会话 · 成员与任务可独立记录';
     $('bind-session').textContent = b.rootSessionId ? '修改会话绑定' : '关联会话标识';
     const automatic=b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId;
-    $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):'关'}`;
-    $('auto-history').disabled=!b.rootSessionId || (!state.nativeAutoHistory?.available && !automatic);
-    $('auto-history').title=state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':state.nativeAutoHistory?.reason ?? '当前后端未提供自动同步条件的详细诊断。';
+    const pending=!!b.syncInitialization?.requested;
+    $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):pending?(b.rootSessionId?'待接入':'待关联'):'关'}`;
+    $('auto-history').disabled=!state.nativeAutoHistory?.available && !automatic && !pending;
+    $('auto-history').title=!b.rootSessionId?'关联当前会话并启用自动同步；已登记的主代理身份会自动填入。':state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':state.nativeAutoHistory?.reason ?? '当前后端未提供自动同步条件的详细诊断。';
+    if(pending)$('notice').textContent=b.rootSessionId?'已保存自动同步选择，等待宿主同步条件就绪。':'已选择自动同步，等待主代理登记当前会话身份后自动关联并启用。';
     $('stat-total').textContent = b.tasks.length;
     $('stat-active').textContent = b.tasks.filter(t => t.status === 'in_progress').length;
     $('stat-done').textContent = b.tasks.filter(t => t.status === 'completed').length;
@@ -158,7 +160,17 @@
   function newBoard() {
     editor('创建工作台', form => {
       inputField(form, '工作台名称', 'title', { required: true, hint: '这里创建任务空间，不会启动新的代理或会话。' });
-    }, async data => { state.owner = 'all'; state.status = 'all'; $('status-filter').value = 'all'; await call('team_create_board', { title: data.get('title') }); });
+      inputField(form, '当前会话标识（可选）', 'sessionId', {maxLength:36,hint:'可填写准确的会话 UUID；留空时，主代理登记真实身份后自动关联，不会猜测最近的聊天。'});
+      const row=el('label'),choice=el('input');choice.type='checkbox';choice.name='automaticHistory';choice.checked=true;
+      row.append(choice,el('span','','自动同步本工作台子代理的可见对话'));form.append(row);
+      form.append(el('small','','关联后在子代理回合停止时自动保存一页可见文本，不保存推理或工具正文。取消勾选则仅创建任务空间。'));
+    }, async data => {
+      state.owner = 'all'; state.status = 'all'; $('status-filter').value = 'all';
+      const args={title:data.get('title')},sessionId=String(data.get('sessionId')??'').trim();
+      if(sessionId)Object.assign(args,{sessionId,nativeIdSource:'user-supplied',evidence:'Exact originating conversation UUID supplied in the creation form'});
+      if(data.get('automaticHistory')==='on')Object.assign(args,{automaticHistory:true,confirmed:true});
+      await call('team_create_board',args);
+    });
   }
   function newTask() {
     const boardId = state.board.id;
@@ -221,7 +233,25 @@
     },data=>{if(data.get('confirmed')!=='on')throw new Error('请先确认恢复。');const b=state.archivedBoards.find(b=>b.id===data.get('boardId'));if(!b)throw new Error('工作台已变化，请刷新。');return call('team_archive_board',{boardId:b.id,expectedRevision:b.revision,action:'restore',confirmed:true});});
   }
   function automaticHistory() {
-    const b=state.board;if(!b || !b.rootSessionId)return;
+    const b=state.board;if(!b)return;
+    if(!b.rootSessionId || b.syncInitialization?.requested){
+      const pending=!!b.syncInitialization?.requested;
+      editor('关联并启用自动同步',form=>{
+        const field=inputField(form,'当前主会话 UUID','sessionId',{value:b.rootSessionId??b.members.find(m=>m.id==='lead')?.nativeId??'',maxLength:36,hint:'使用已登记的主代理身份，或填写从原聊天核实的准确标识。不会根据其他聊天自动猜测。'});
+        if(b.rootSessionId)field.readOnly=true;
+        if(pending)inputField(form,'操作','action',{type:'select',options:[['enable','关联并启用'],['cancel','取消等待并关闭自动同步']]});
+        form.append(el('p','muted','仅此工作台、此主会话下经公开父子关系核对的子代理；回合停止后保存一页可见文本，原有任务和记录保留。'));
+        confirmField(form,'确认此工作台的会话关联与自动同步范围');
+      },data=>{
+        if(data.get('confirmed')!=='on')throw new Error('请先确认关联与同步范围。');
+        if(pending && data.get('action')==='cancel')return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId??'',enabled:false,confirmed:true});
+        const sessionId=String(data.get('sessionId')??'').trim();
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId))throw new Error('尚未取得准确会话标识。请由原主代理登记当前会话身份，或填写核实后的完整 UUID。');
+        if(b.rootSessionId)return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId,enabled:true,confirmed:true});
+        return call('team_bind_session',{boardId:b.id,sessionId,expectedRevision:b.revision,automaticHistory:true,confirmed:true,nativeIdSource:'user-supplied',evidence:'User confirmed this displayed originating UUID and this board scoped automatic visible-text sync in one initialization form'});
+      });
+      return;
+    }
     const enabled=!(b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId);
     editor(enabled?'启用后台自动同步可见对话':'关闭后台自动同步可见对话',form=>{
       form.append(el('p','muted',`范围：仅此工作台当前主会话 ${b.rootSessionId} 下，经公开父子关系核对的子代理。`));
@@ -325,7 +355,7 @@
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.4 · 未连接宿主' : '插件协议已连接 · 0.5.4';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.5 · 未连接宿主' : '插件协议已连接 · 0.5.5';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

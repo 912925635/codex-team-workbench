@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.5 — workbench synchronization initialization
+
+- Create a workbench with an exact originating UUID and confirmed automatic
+  history choice in one operation; a confirmed pending choice completes when
+  the explicitly sourced lead identity is registered.
+- Establish the first association from an explicitly sourced lead UUID, without
+  silently opting into content collection. Child reports cannot bind the board,
+  existing roots cannot change silently, and disabling/cancelling stays effective.
+- Give unbound workbenches a setup entrypoint and a visible pending state instead
+  of an unexplained disabled switch. Keep manual-only creation available.
+- Run cached native reader subprocesses from a stable home directory, so cache
+  pruning cannot leave them inheriting a deleted working directory.
+- Recover watcher status after a later successful refresh and expose bounded
+  current failure details. Preserve exact-parent checks, history limits, data
+  schema, plugin identity and normal Hook trust review.
+- Add initialization, cancellation, scope, UI and deleted-working-directory
+  regressions. Retain the standard bundled Hook declarations; no private host
+  paths, data, trust records or machine-specific deployment settings are included.
+- Standard Linux release validation: 142 tests passed, two Windows-only checks
+  skipped, zero failures; all 87 public source files passed privacy review.
+
 ## 0.5.4 — Linux native read adapter
 
 - Register Linux readers instead of restricting native history to Windows.

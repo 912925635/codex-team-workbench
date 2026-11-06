@@ -18,7 +18,7 @@ export function handle(store, message) {
     case 'initialize':
       return reply({ protocolVersion: ['2025-03-26', '2025-06-18', '2025-11-25'].includes(message.params?.protocolVersion)
         ? message.params.protocolVersion : '2025-11-25',
-        serverInfo: { name: 'team-workbench', version: '0.5.4' },
+        serverInfo: { name: 'team-workbench', version: '0.5.5' },
         capabilities: { tools: {}, resources: {} },
         instructions: 'Use the team-workbench Skill for explicitly authorized native execution and exact source-labeled records. Ordinary panel CRUD, refresh and bound history reads call MCP directly and need no main-chat response. For protocolVersion 3 execution/continuation, first read only team_get_request using the exact board/request ID; do not load unrelated board/history. Native spawn/continuation still uses actual spawning-lead collaboration tools, never a separate app-server team or direct V2 input. Public history is bounded and parent-verified; optional explicitly labeled lead-assisted identity/history requests may use actual available host tools. Never substitute another parent/child, infer a UUID, or promote a link/message acknowledgment to visual success.' });
     case 'ping': return reply({});
