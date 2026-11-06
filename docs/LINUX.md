@@ -1,4 +1,4 @@
-# Linux server synchronization (0.5.4)
+# Linux server synchronization (0.5.5)
 
 ## Adapter gap in 0.5.3
 
@@ -87,3 +87,19 @@ prove a particular server has the socket, trusted Hooks or authorized history.
 
 References: [Codex transports/read APIs](https://learn.chatgpt.com/docs/app-server),
 [Node Unix HTTP socket support](https://nodejs.org/api/http.html).
+
+
+## Initialization and cache updates in 0.5.5
+
+A workbench can have a reported lead UUID while its board association is still
+missing. Registration of an explicitly sourced lead UUID now establishes that
+first association. Visible-history collection additionally requires this board's
+confirmed choice; no child report or anonymous host-session value can bind it.
+See [initialization](INITIALIZATION.md).
+
+Plugin cache replacement can remove a running backend's working directory.
+Both cached reader subprocesses explicitly use the backend user's home, so they
+can continue issuing the same bounded public reads after that replacement.
+The watcher clears an earlier refresh failure after a successful pass; a current
+failure includes bounded code/message diagnostics. Neither fix changes socket
+permissions or starts another native runtime.

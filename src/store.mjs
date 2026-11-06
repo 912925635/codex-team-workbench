@@ -10,7 +10,7 @@ import { isThreadId } from './history-sync.mjs';
 import { runtimeView } from './runtime-view.mjs';
 import { readNativeMetadata, nativeReadPlatformSupported, publicReaderStatus } from './native-topology.mjs';
 import { readNativeHistory, readNativeHistoryAsync } from './native-history.mjs';
-import { ensureAutoHistoryWatch, stopAutoHistory } from './auto-history.mjs';
+import { ensureAutoHistoryWatch, stopAutoHistory, autoHistoryStatus, configureAutoHistory } from './auto-history.mjs';
 
 export function dataDirectory() {
   return resolve(process.env.TEAM_WORKBENCH_DATA || (process.env.PLUGIN_DATA
@@ -85,14 +85,38 @@ export class Store {
     requireValue(row, 'BOARD_NOT_FOUND', 'Board not found');
     return JSON.parse(row.state);
   }
-  create(title) {
+  create(title, options = {}) {
+    if (options.sessionId !== undefined) requireValue(isThreadId(options.sessionId), 'INVALID_THREAD_ID', 'Supply the full native root UUID; anonymous session metadata is not a thread identity');
+    if (options.automaticHistory === true) requireValue(options.confirmed === true, 'CONFIRMATION_REQUIRED', 'Confirm automatic visible-text sync for this new workbench');
     const stamp = now();
     const board = { id: randomUUID(), title: text(title, 'title'), revision: 1, nextTask: 1,
       rootSessionId: null, createdAt: stamp, updatedAt: stamp, tasks: [], events: [],
       members: [{ id: 'lead', name: '协调者', role: 'lead', parentId: null,
         source: 'manual', status: 'unknown', observedAt: stamp, nativeId: null }] };
+    if (options.sessionId) {
+      board.rootSessionId = options.sessionId;
+      Object.assign(board.members[0], { nativeId: options.sessionId, nativeIdentity: {
+        source: options.nativeIdSource ?? 'user-supplied', evidence: options.evidence ?? 'Exact root UUID supplied when creating this workbench',
+        observedAt: stamp, verification: 'reported-unverified' } });
+      this.event(board, 'session_bound', 'Initial root UUID supplied with workbench creation');
+    }
+    if (options.automaticHistory === true) board.syncInitialization = {
+      requested: true, confirmed: true, requestedAt: stamp, state: options.sessionId ? 'waiting-for-reader' : 'waiting-for-identity',
+      coverage: 'one-latest-turn-visible-text-on-native-stop' };
     this.db.prepare('INSERT INTO boards (id,state) VALUES (?,?)').run(board.id, JSON.stringify(board));
-    return board;
+    return this.initializeHistory(board.id);
+  }
+  initializeHistory(id) {
+    const board = this.read(id), setup = board.syncInitialization;
+    if (!setup?.requested || setup.confirmed !== true || board.archivedAt || !isThreadId(board.rootSessionId)) return this.view(board);
+    if (!autoHistoryStatus(this, board).available) return this.view(board);
+    try {
+      return configureAutoHistory(this, { boardId: id, expectedRevision: board.revision,
+        expectedRootSessionId: board.rootSessionId, enabled: true, confirmed: true }).board;
+    } catch (error) {
+      if (error.code === 'STALE_REVISION') return this.view(this.read(id));
+      throw error;
+    }
   }
   transact(id, operation) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -110,7 +134,8 @@ export class Store {
     b.events = b.events.slice(-150);
   }
   bind(id, sessionId, expectedRevision, correction = {}) {
-    return this.transact(id, b => {
+    if (correction.automaticHistory === true) requireValue(correction.confirmed === true, 'CONFIRMATION_REQUIRED', 'Confirm automatic visible-text sync for this root');
+    const board = this.transact(id, b => {
       requireValue(b.revision === expectedRevision, 'STALE_REVISION', 'Board changed; refresh before binding');
       const session = text(sessionId, 'sessionId', 200);
       requireValue(isThreadId(session), 'INVALID_THREAD_ID', 'Supply the full 36-character native thread UUID. A short label or anonymous session ID cannot bind a conversation.');
@@ -123,6 +148,7 @@ export class Store {
         b.bindingHistory ??= [];
         b.bindingHistory.push({ sessionId: previous, generation, changedAt: now(), evidence, lead: { ...lead } });
         b.bindingGeneration = generation + 1;
+        if (b.syncInitialization?.requested) b.syncInitialization = {...b.syncInitialization, requested:false, state:'cancelled'};
         for (const member of b.members.filter(m => m.id !== 'lead' && !m.historyOnly)) {
           member.historyOnly = true;
           member.historyBinding = { sessionId: previous, generation, parentThreadId: b.members.find(m => m.id === member.parentId)?.nativeId ?? null };
@@ -135,8 +161,11 @@ export class Store {
       b.rootSessionId = session;
       lead.nativeId = session;
       lead.nativeIdentity = { source: correction.nativeIdSource ?? 'user-supplied', evidence: correction.evidence ?? 'Full thread UUID explicitly supplied through session binding', observedAt: now(), verification: 'reported-unverified' };
+      if (correction.automaticHistory === true) b.syncInitialization = { requested: true, confirmed: true,
+        requestedAt: now(), state: 'waiting-for-reader', coverage: 'one-latest-turn-visible-text-on-native-stop' };
       this.event(b, previous && previous !== session ? 'session_binding_changed' : 'session_bound', 'Full UUID explicitly supplied; old execution sources retained separately');
     });
+    return correction.automaticHistory === true ? this.initializeHistory(board.id) : board;
   }
   observeRuntime(id, input) {
     return this.transact(id, b => {
@@ -167,7 +196,7 @@ export class Store {
     });
   }
   reportMember(id, input) {
-    return this.transact(id, b => {
+    const board = this.transact(id, b => {
       const memberId = text(input.memberId, 'memberId');
       requireValue(!b.memberAliases?.[memberId], 'MEMBER_MERGED', 'This exact native member was consolidated; refresh and use its canonical ID');
       const existing = b.members.find(m => m.id === memberId);
@@ -191,8 +220,17 @@ export class Store {
         observedAt: now() };
       if (existing) b.members[b.members.indexOf(existing)] = member;
       else { requireValue(b.members.length < 100, 'MEMBER_LIMIT', 'Maximum 100 members'); b.members.push(member); }
+      // Initial association uses only an explicitly sourced lead UUID.
+      // Visible-history collection still needs this board's separate consent.
+      if (memberId === 'lead' && !b.rootSessionId && input.nativeId && isThreadId(member.nativeId)
+          && ['host-env','public-thread-read','user-supplied'].includes(member.nativeIdentity?.source) && !b.archivedAt) {
+        b.rootSessionId = member.nativeId;
+        if (b.syncInitialization?.requested) b.syncInitialization.state = 'waiting-for-reader';
+        this.event(b, 'session_bound', 'Initial binding from the explicitly sourced lead identity; no UUID guessed');
+      }
       this.event(b, 'member_report', `${member.name}: ${member.status}`);
     });
+    return input.memberId === 'lead' ? this.initializeHistory(board.id) : board;
   }
   dependencies(b, ids, self) {
     requireValue(Array.isArray(ids) && ids.length <= 100 && new Set(ids).size === ids.length, 'INVALID_ARGUMENT', 'Dependencies must be unique task IDs');

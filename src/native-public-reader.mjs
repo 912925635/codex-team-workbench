@@ -171,7 +171,7 @@ function visiblePage(data) {
 export async function readPublicRequest(input, options = {}) {
   const request = validateRequest(input), socket = await openPublicSocket(options.socketPath ?? controlSocketPath(), options);
   try {
-    await socket.request('initialize', { clientInfo: { name: 'team_workbench_readonly', version: '0.5.4' } });
+    await socket.request('initialize', { clientInfo: { name: 'team_workbench_readonly', version: '0.5.5' } });
     socket.initialized();
     const threads = [], rows = new Map();
     for (const id of request.threadIds) {

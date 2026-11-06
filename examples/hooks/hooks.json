@@ -1,5 +1,5 @@
 {
-  "description": "OPTIONAL metadata-only native lifecycle handlers for explicitly bound active workbenches. Not registered or enabled by the plugin manifest. Review and approval required before deployment.",
+  "description": "Metadata-only native lifecycle handlers declared by the plugin for explicitly bound active workbenches. Review and trust through the native host before execution.",
   "hooks": {
     "SubagentStart": [
       {

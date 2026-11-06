@@ -17,7 +17,7 @@ const identityFields = { runtimeRef: str(300), nativeId: str(), hostId:str(), sp
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
 const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 // Version the view independently of any host-cached old tool/resource metadata.
-export const UI_URI = 'ui://team-workbench/panel/0.5.4';
+export const UI_URI = 'ui://team-workbench/panel/0.5.5';
 export const LEGACY_UI_URI = 'ui://team-workbench/panel';
 export const tools = [
   { name: 'team_panel', title: '团队工作台', description: 'Open the persistent shared task board and team map. With boardId, remember that selection if the host supplies anonymous session metadata; {} reopens it. This correlation is not a native Codex thread ID. Does not discover or control agents.',
@@ -25,19 +25,19 @@ export const tools = [
     _meta: { ui: { resourceUri: UI_URI }, 'openai/ui': { entrypoints: [{ type: 'thread' }] } } },
   {name:'team_request_host_action',description:'Record a user-requested exact-target navigation or supported continuation. Does not execute the host operation. A message acknowledgment is not success.',inputSchema:obj({boardId:str(),memberId:str(),kind:{type:'string',enum:['navigate','resume']},instructions:str(16384),expectedNativeId:str()},['boardId','memberId','kind']),annotations:write},
   {name:'team_get_request',description:'Read one exact execution/host-action request with its stored instructions and required target/parent revisions. Returns no unrelated tasks, messages or work history. Use for compact panel requests instead of loading an entire board.',inputSchema:obj({boardId:str(),requestId:str(),kind:{type:'string',enum:['execution','host-action']}},['boardId','requestId','kind']),annotations:readOnly},
-  {name:'team_set_history_sync',description:'After explicit user confirmation, enable/disable automatic bounded visible-text sync on native stop for this exact active board root. Watches only the existing plugin-owned metadata journal; no Hook/security configuration change, new model or main-chat message. Existing history is retained when disabled.',inputSchema:obj({boardId:str(),expectedRevision:revision,expectedRootSessionId:str(),enabled:{type:'boolean'},confirmed:{type:'boolean'}},['boardId','expectedRevision','expectedRootSessionId','enabled','confirmed']),annotations:write},
+  {name:'team_set_history_sync',description:'After explicit user confirmation, enable/disable automatic bounded visible-text sync for this exact board root. An empty expectedRootSessionId is allowed only to cancel an unbound board pending initialization. Existing history is retained; no native agent or Hook configuration is changed.',inputSchema:obj({boardId:str(),expectedRevision:revision,expectedRootSessionId:{type:'string',maxLength:200},enabled:{type:'boolean'},confirmed:{type:'boolean'}},['boardId','expectedRevision','expectedRootSessionId','enabled','confirmed']),annotations:write},
   {name:'team_record_host_action',description:'Record one exact supported host result with its actual source. ui/open-link acknowledgment is accepted, not visual success; ui/message delivery alone cannot succeed. User-confirmed cancelled only closes the local workbench wait and never sends a message or stops a native operation.',inputSchema:obj({boardId:str(),actionId:str(),expectedRevision:revision,nativeId:str(),status:{type:'string',enum:['sent','accepted','succeeded','failed','cancelled']},source:{type:'string',enum:['codex-app-tools.navigate_to_codex_page','collaboration.followup_task','collaboration.send_message','ui/message','ui/open-link','panel-user-confirmation']},confirmed:{type:'boolean'},result:str(2000)},['boardId','actionId','expectedRevision','nativeId','status','source','result']),annotations:write},
   { name: 'team_snapshot', description: 'List boards or read one board, including task revisions and source-labeled observations. Ingests configured plugin-owned Hook metadata and schedules only confirmed per-board background history. No model invocation or native agent control.',
     inputSchema: obj({ boardId: str() }), annotations: readOnly },
-  { name: 'team_create_board', description: 'Create an empty local team board. Does not create any agent or thread.',
-    inputSchema: obj({ title: str() }, ['title']), annotations: write },
-  { name: 'team_bind_session', description: 'Bind or explicitly change a board conversation using a full native UUID. A change requires exact previousSessionId, confirmRebind=true and evidence after showing old/new IDs and history isolation to the user. Old members, executions and snapshots retain their original source and cannot be synced under the new origin. Never guess an ID.',
-    inputSchema: obj({ boardId: str(), sessionId: str(), expectedRevision: revision, previousSessionId: str(), confirmRebind: {type:'boolean'}, nativeIdSource: {type:'string',enum:['public-thread-read','user-supplied']}, evidence: str(4000) }, ['boardId', 'sessionId', 'expectedRevision']), annotations: write },
+  { name: 'team_create_board', description: 'Create a local workbench. Supply the actual originating sessionId to bind it immediately. For user-approved automatic sync, set automaticHistory=true and confirmed=true; if identity is not yet known, registering the real lead UUID completes initialization automatically. Anonymous session metadata is never a thread UUID. Does not create any agent or thread.',
+    inputSchema: obj({ title: str(), sessionId:str(), automaticHistory:{type:'boolean'}, confirmed:{type:'boolean'}, nativeIdSource:{type:'string',enum:['host-env','public-thread-read','user-supplied']}, evidence:str(4000) }, ['title']), annotations: write },
+  { name: 'team_bind_session', description: 'Bind a full native UUID; automaticHistory=true with confirmed=true also initializes this board scoped visible-text sync in the same call. Changing an existing root still requires exact previousSessionId, confirmRebind=true and user-reviewed old/new IDs and history isolation. Old sources are preserved. Never guess an ID.',
+    inputSchema: obj({ boardId: str(), sessionId: str(), expectedRevision: revision, previousSessionId: str(), confirmRebind: {type:'boolean'}, automaticHistory:{type:'boolean'}, confirmed:{type:'boolean'}, nativeIdSource: {type:'string',enum:['public-thread-read','user-supplied']}, evidence: str(4000) }, ['boardId', 'sessionId', 'expectedRevision']), annotations: write },
   { name: 'team_archive_board', description: 'Archive or restore a workbench after explicit user confirmation of scope. This is reversible; it never deletes tasks, member records, transcripts or project files and does not stop agents.',
     inputSchema: obj({boardId:str(),expectedRevision:revision,action:{type:'string',enum:['archive','restore']},confirmed:{type:'boolean'}},['boardId','expectedRevision','action','confirmed']),annotations:write },
   { name:'team_observe_runtime',description:'Record an actual collaboration list_agents or wait_agent state for the exact recorded runtime path. Evidence and observation time are lead-relayed and not server-authenticated; stale observations cannot overwrite newer ones. resumeAvailable is only true when the lead actually sees the exact agent and has the supported followup tool.',
     inputSchema:obj({boardId:str(),memberId:str(),runtimeRef:str(300),sourceThreadId:str(),expectedRevision:revision,state:{type:'string',enum:['running','idle','completed','failed','cancelled','unknown']},observedAt:str(100),source:{type:'string',enum:['collaboration.list_agents','collaboration.wait_agent']},resumeAvailable:{type:'boolean'},evidence:str(4000)},['boardId','memberId','runtimeRef','sourceThreadId','expectedRevision','state','observedAt','source','resumeAvailable','evidence']),annotations:write },
-  { name: 'team_report_member', description: 'Record a caller-reported member and state, labeled reported. Does not create, verify, resume, or control a native agent. actor IDs are conventions, not authenticated identities.',
+  { name: 'team_report_member', description: 'Record a caller-reported member. An explicitly sourced native UUID for lead also establishes the first unbound board association; user-approved pending automatic sync then initializes. Child reports never bind the board and existing roots never change. Does not create, resume, or control a native agent.',
     inputSchema: obj({ boardId: str(), memberId: str(), name: str(100), parentId: str(), ...identityFields,
       workflowId: { type: 'string', maxLength: 200 }, tokenTotal: natural, durationMs: natural,
       status: { type: 'string', enum: ['unknown', 'working', 'idle', 'completed', 'blocked'] } }, ['boardId', 'memberId', 'name', 'status']), annotations: write },
@@ -94,6 +94,7 @@ export function dispatch(store, name, args = {}, context = {}) {
       if (name === 'team_panel' && args.boardId) store.selectBoard(context.anonymousSession, args.boardId);
       let nativeEvents = { enabled: false, state: 'disabled', applied: 0 };
       if (boardId) {
+        store.initializeHistory(boardId);
         try { nativeEvents = syncNativeEvents(store, boardId); }
         catch { nativeEvents = { enabled: !!store.nativeEventJournal, state: 'error-reading-local-hook-journal', applied: 0 }; }
       }
@@ -107,7 +108,7 @@ export function dispatch(store, name, args = {}, context = {}) {
         nativeAutoHistory:autoHistoryStatus(store,selected),
         conversationAssociation: store.sessionHash(context.anonymousSession) ? 'anonymous-host-session' : 'not-provided' };
     }
-    case 'team_create_board': board = store.view(store.create(args.title)); break;
+    case 'team_create_board': board = store.create(args.title, args); break;
     case 'team_bind_session': board = store.bind(args.boardId, args.sessionId, args.expectedRevision, args); break;
     case 'team_archive_board': {
       board = store.archive(args.boardId,args.expectedRevision,args.action,args.confirmed);
@@ -128,7 +129,8 @@ export function dispatch(store, name, args = {}, context = {}) {
     case 'team_bind_agent_activity': return bindAgentActivity(store,args);
   }
   if (name === 'team_create_board') store.selectBoard(context.anonymousSession, board.id);
-  return { boards: store.list(), archivedBoards:store.list({includeArchived:true}).filter(b=>b.archivedAt), board };
+  return { boards: store.list(), archivedBoards:store.list({includeArchived:true}).filter(b=>b.archivedAt), board,
+    nativeAutoHistory: board ? autoHistoryStatus(store,board) : undefined };
 }
 export function callTool(store, name, args, context) {
   try {

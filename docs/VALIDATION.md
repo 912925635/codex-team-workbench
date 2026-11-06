@@ -1,9 +1,12 @@
 # Validation
 
-The current source is 0.5.4. On the Windows development runner, 131 isolated tests
-pass and one Linux-only Unix/default-reader test is skipped (132 total, no failures).
-Cross-platform protocol fixtures pass over a Windows named pipe. No native Linux
-execution or actual Linux server acceptance is claimed. Run:
+The current source is 0.5.5. On Linux, 142 of 144 isolated tests pass; the two
+Windows-only Hook-launch tests are skipped, with zero failures. Release checks use the standard bundled-Hook
+manifests, not a machine-specific user-Hook override. Linux validation covers
+initialization, scope and cancellation, the actual stdio UI handlers, cached
+readers with a deleted backend working directory, and the existing filesystem
+watcher/public-RPC fixtures. Windows-only Hook-launch checks are skipped on Linux.
+Run:
 
 ```powershell
 npm run check
@@ -32,3 +35,12 @@ deployment or trust of the packaged plugin's Hooks.
 No GitHub-imported desktop instance has passed full UI activation, visual tree,
 navigation or continuation-button acceptance. Current source publication does not
 claim installation, automatic cross-identity data migration or verified MCP hot reload.
+
+
+For this repair, an authorized Linux installation separately produced real native
+start, pre-model-request and stop metadata, followed by backend bounded visible
+history saves. The repaired initialization interface and served panel resource
+were also checked through that installation's actual MCP connection. These are
+local-installation observations, not a claim that publishing this source installs
+or trusts the standard package. Private receipts, identities and workbench data
+are excluded from the public source and archive.

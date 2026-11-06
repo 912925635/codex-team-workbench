@@ -7,7 +7,7 @@ is `.agents/plugins/marketplace.json`, with one plugin at `source.path: "./"`.
 Paths are relative to the repository root, not the manifest directory.
 The marketplace name is `codex-team-workbench`; the plugin name is
 `team-workbench`. Preserve both when updating. Portable `plugin.json` and native
-`.codex-plugin/plugin.json` declare the same version, currently `0.5.4`.
+`.codex-plugin/plugin.json` declare the same version, currently `0.5.5`.
 
 ## Add or update the source
 
@@ -40,7 +40,7 @@ the same schedule, one-click update control, unattended plugin upgrade or live
 MCP hot reload. These are host capabilities, not a marketplace-manifest setting.
 This project installs no separate updater, edits no host cache and does not
 restart the client. Use the actual supported source-sync/update controls and
-verify the resulting panel reports **插件协议已连接 · 0.5.4**.
+verify the resulting panel reports **插件协议已连接 · 0.5.5**.
 
 ## Preserve history
 

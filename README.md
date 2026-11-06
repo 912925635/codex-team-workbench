@@ -4,12 +4,15 @@ A local MCP workbench for native Codex collaborators, inspired by DeepSeek Harne
 Tasks, lifecycle observations, exact parent relationships and source-labeled records
 share one conversation panel.
 
-**0.5.4 为开发验证版，加入 Linux 原生历史读取适配。GitHub 发布不代表客户端已安装。Windows 真实历史直读已实测；Linux 实机及客户端
-直接跳转与完整桌面 UI 验收尚未完成。** 原稳定源码仍可追溯至提交
+**0.5.5 修复新工作台的同步初始化、缓存更新后的读取目录，以及监视状态恢复。**
+Linux 原生 Hook 与后台读取链路已在一个授权安装范围内验证；标准安装仍需宿主正常
+审阅 Hook。GitHub 源码发布、客户端安装和实际连接重载分别处理。原稳定源码可追溯至
 [`3a66a9a`](https://github.com/912925635/codex-team-workbench/commit/3a66a9accb0a8ae9fb6dc54fefad1b45d5424d29)。
 
 ## 已实现与实测
 
+- 新建时可一并关联准确的主会话并启用已确认的自动同步；身份暂缺时显示“待关联”，
+  主代理登记真实身份后自动接上。可取消等待；子代理登记不会改变工作台根会话。
 - SQLite 持久化任务、负责人、DAG 依赖、原子领取与版本冲突检查。
 - 原生 `SubagentStart`、`SubagentStop`、`PreModelRequest` 回调写入插件自己的元数据
   journal；普通 MCP 快照自动读取，无需反复发同步指令，不使用模型轮询状态。
@@ -29,9 +32,9 @@ share one conversation panel.
 - 启动、续接及可选的主会话协助操作明确标注会发送请求；任务正文保存在后端，执行与
   续接消息只带请求标识。消息发出不等于执行成功；旧代理不在目录时不新建替身。
 
-0.5.3 基线为 119 项通过；0.5.4 在 Windows 回归中 131 项通过、1 项 Linux 专用测试跳过，0 项失败。按钮路径、真实直读证据与未完成的宿主检查见
-[0.5.2 按钮验收](docs/BUTTON_ACTIONS_0.5.2.md)，原生事件证据见
-[0.5.1 验收记录](docs/ACCEPTANCE_0.5.1.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
+0.5.5 的初始化、状态恢复与原生读取回归见 [验证说明](docs/VALIDATION.md)。
+新建和取消同步的具体行为见 [初始化流程](docs/INITIALIZATION.md)，
+按钮路径和较早的原生验收见 [0.5.2 按钮验收](docs/BUTTON_ACTIONS_0.5.2.md)。
 公开仓库仅含合成测试数据，不含真实会话标识、转录、任务数据库或测试回执。
 后台架构、实测耗时与尚未测量的部分见 [数据流说明](docs/DATA_FLOW_0.5.2.md)。
 0.5.2 隔离后端已用真实新代理及同一代理续接验证，两个停止事件到会话页保存分别为
