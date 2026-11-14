@@ -8,10 +8,129 @@
   class WorkbenchBrowser {
     constructor({ bridge, getBoard, openTask, runNames, onSnapshot = () => {} }) {
       Object.assign(this, { bridge, getBoard, openTask, runNames, onSnapshot }); this.folded = new Set(); this.serial = 0;
+      this.mapZoom = 1; this.mapSize = null; this.mapFrame = null; this.mapTree = null;
+      this.ensureMapControls();
       $('close-node').onclick = () => this.close();
       $('node-detail').addEventListener('cancel', () => { this.serial++; this.active = null; });
     }
     close() { this.serial++; this.active = null; $('node-detail').close(); }
+    ensureMapControls() {
+      const viewport = $('team-map');
+      if (!viewport?.parentNode || this.mapControls) return;
+      const controls = el('div', 'map-controls');
+      controls.setAttribute('role', 'toolbar'); controls.setAttribute('aria-label', '团队画布视图控制');
+      const zoomOut = button('−', () => this.setMapZoom(this.mapZoom - 0.1), 'map-control');
+      zoomOut.setAttribute('aria-label', '缩小画布'); zoomOut.title = '缩小画布';
+      this.mapReadout = el('output', 'map-zoom-readout', '100%');
+      this.mapReadout.setAttribute('aria-label', '当前画布缩放比例'); this.mapReadout.setAttribute('aria-live', 'polite');
+      const zoomIn = button('+', () => this.setMapZoom(this.mapZoom + 0.1), 'map-control');
+      zoomIn.setAttribute('aria-label', '放大画布'); zoomIn.title = '放大画布';
+      const fit = button('适应', () => this.fitMap(), 'map-control map-control-fit');
+      fit.setAttribute('aria-label', '适应画布'); fit.title = '缩放并居中显示全部节点';
+      const reset = button('100%', () => this.resetMap(), 'map-control map-control-reset');
+      reset.setAttribute('aria-label', '重置画布到 100%'); reset.title = '恢复 100% 并居中';
+      controls.append(zoomOut, this.mapReadout, zoomIn, fit, reset);
+      viewport.parentNode.insertBefore(controls, viewport);
+      this.mapControls = controls;
+      this.bindMapPan(viewport);
+    }
+    bindMapPan(viewport) {
+      if (this.mapPanBound) return;
+      this.mapPanBound = true;
+      let drag = null;
+      viewport.addEventListener('pointerdown', event => {
+        if (event.button !== 0 || event.pointerType === 'touch' || event.target?.closest?.('button,a,input,textarea,select,summary')) return;
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop, moved: false };
+        viewport.classList.add('map-panning');
+        viewport.setPointerCapture?.(event.pointerId);
+      });
+      viewport.addEventListener('pointermove', event => {
+        if (!drag || drag.id !== event.pointerId) return;
+        const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+        if (drag.moved) { viewport.scrollLeft = drag.left - dx; viewport.scrollTop = drag.top - dy; }
+      });
+      const finish = event => {
+        if (!drag || (event.pointerId !== undefined && drag.id !== event.pointerId)) return;
+        viewport.classList.remove('map-panning');
+        if (drag.moved) this.mapFocus = this.captureMapFocus();
+        viewport.releasePointerCapture?.(drag.id); drag = null;
+      };
+      viewport.addEventListener('pointerup', finish);
+      viewport.addEventListener('pointercancel', finish);
+    }
+    mapPadding(viewport) {
+      const style = globalThis.getComputedStyle?.(viewport);
+      const read = key => Number.parseFloat(style?.[key] ?? '0') || 0;
+      return { x: read('paddingLeft') + read('paddingRight'), y: read('paddingTop') + read('paddingBottom') };
+    }
+    captureMapFocus() {
+      const viewport = $('team-map'), frame = this.mapFrame;
+      if (!viewport || !frame || !this.mapZoom) return null;
+      const viewportRect = viewport.getBoundingClientRect?.(), frameRect = frame.getBoundingClientRect?.();
+      const centerX = viewport.clientWidth / 2, centerY = viewport.clientHeight / 2;
+      if (viewportRect && frameRect) {
+        const pointX = viewportRect.left + viewport.clientLeft + centerX;
+        const pointY = viewportRect.top + viewport.clientTop + centerY;
+        return { x: (pointX - frameRect.left) / this.mapZoom, y: (pointY - frameRect.top) / this.mapZoom };
+      }
+      return { x: (viewport.scrollLeft + centerX) / this.mapZoom, y: (viewport.scrollTop + centerY) / this.mapZoom };
+    }
+    positionMapFocus(focus) {
+      const viewport = $('team-map'), frame = this.mapFrame;
+      if (!viewport || !frame || !focus) return;
+      const viewportRect = viewport.getBoundingClientRect?.(), frameRect = frame.getBoundingClientRect?.();
+      if (viewportRect && frameRect) {
+        const originX = frameRect.left - viewportRect.left - viewport.clientLeft + viewport.scrollLeft;
+        const originY = frameRect.top - viewportRect.top - viewport.clientTop + viewport.scrollTop;
+        viewport.scrollLeft = originX + focus.x * this.mapZoom - viewport.clientWidth / 2;
+        viewport.scrollTop = originY + focus.y * this.mapZoom - viewport.clientHeight / 2;
+      } else {
+        viewport.scrollLeft = Math.max(0, focus.x * this.mapZoom - viewport.clientWidth / 2);
+        viewport.scrollTop = Math.max(0, focus.y * this.mapZoom - viewport.clientHeight / 2);
+      }
+    }
+    applyMapZoom() {
+      const viewport = $('team-map'), frame = this.mapFrame, tree = this.mapTree;
+      if (!viewport || !frame || !tree || !this.mapSize) return;
+      const focus = this.captureMapFocus();
+      frame.style.width = `${this.mapSize.width * this.mapZoom}px`;
+      frame.style.height = `${this.mapSize.height * this.mapZoom}px`;
+      tree.style.width = `${this.mapSize.width}px`; tree.style.height = `${this.mapSize.height}px`;
+      tree.style.transform = `scale(${this.mapZoom})`;
+      this.positionMapFocus(focus);
+      if (this.mapReadout) {
+        const label = `${Math.round(this.mapZoom * 100)}%`;
+        if (this.mapReadout.textContent !== label) this.mapReadout.textContent = label;
+      }
+      this.mapControls?.querySelectorAll?.('.map-control')?.forEach(control => {
+        if (control.getAttribute('aria-label') === '缩小画布') control.disabled = this.mapZoom <= 0.1;
+        if (control.getAttribute('aria-label') === '放大画布') control.disabled = this.mapZoom >= 1.6;
+      });
+    }
+    setMapZoom(value) {
+      const next = Math.round(Math.max(0.1, Math.min(1.6, value)) * 100) / 100;
+      if (next === this.mapZoom) return;
+      const focus = this.captureMapFocus(); this.mapZoom = next;
+      this.applyMapZoom(); this.positionMapFocus(focus);
+      this.mapFocus = this.captureMapFocus();
+    }
+    fitMap() {
+      if (!this.mapSize) return;
+      const viewport = $('team-map'), padding = this.mapPadding(viewport);
+      const availableWidth = Math.max(1, viewport.clientWidth - padding.x - 4);
+      const availableHeight = Math.max(1, viewport.clientHeight - padding.y - 4);
+      this.mapZoom = Math.round(Math.max(0.1, Math.min(1.6,
+        Math.min(availableWidth / this.mapSize.width, availableHeight / this.mapSize.height))) * 100) / 100;
+      this.applyMapZoom();
+      this.positionMapFocus({ x: this.mapSize.width / 2, y: this.mapSize.height / 2 });
+      this.mapFocus = this.captureMapFocus();
+    }
+    resetMap() {
+      this.mapZoom = 1; this.applyMapZoom();
+      if (this.mapSize) this.positionMapFocus({ x: this.mapSize.width / 2, y: this.mapSize.height / 2 });
+      this.mapFocus = this.captureMapFocus();
+    }
     canRequestContinuation(node) {
       if (!node.runtimeRef || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(node.nativeId ?? '') || node.historyOnly || !this.bridge.canMessageLead?.()) return false;
       const age=Date.now()-Date.parse(node.runtimeObservation?.observedAt ?? '');
@@ -24,6 +143,10 @@
 
     renderMap() {
       const board = this.getBoard(), nodes = board.sessionTree ?? [];
+      this.ensureMapControls();
+      const sameBoard = this.mapBoardId === board.id;
+      const previousFocus = sameBoard ? this.captureMapFocus() : null;
+      if (!sameBoard) this.mapZoom = 1;
       const tree = el('div', 'map-tree'); tree.setAttribute('role', 'tree'); tree.setAttribute('aria-label', '已登记会话与工作流');
       const branch = (node, level) => {
         const entity = (node.kind === 'member' ? board.members : board.workflows).find(n => n.id === node.entityId);
@@ -39,11 +162,15 @@
         const card = button('', () => this.open(node.kind, node.entityId), `member-card browse-card ${entity.role ?? 'workflow'}`);
         card.setAttribute('aria-label', `查看${node.kind === 'workflow' ? '工作流' : '成员'}：${node.label}`);
         const top = el('span', 'member-top'), role = el('span', 'member-role');
-        role.append(el('span', '', node.kind === 'workflow' ? '工作流 / WORKFLOW' : entity.role === 'lead' ? '协调者 / LEAD' : entity.relation==='session_association' ? '会话关联 / 上级待确认' : `成员 / LEVEL ${level}`), el('span', 'source', sources[node.source] ?? node.source));
+        const markerKind = node.kind === 'workflow' ? 'workflow' : entity.source === 'hook' ? 'hook' : 'member';
+        const marker = el('span', `relation-marker relation-${markerKind}`); marker.setAttribute('aria-hidden', 'true');
+        const kind = el('span', 'member-kind');
+        kind.append(marker, el('span', '', node.kind === 'workflow' ? '工作流 / WORKFLOW' : entity.role === 'lead' ? '协调者 / LEAD' : entity.relation==='session_association' ? '会话关联 / 上级待确认' : `成员 / LEVEL ${level}`));
+        role.append(kind, el('span', 'source', sources[node.source] ?? node.source));
         top.append(role, el('span', 'member-name', node.label));
-        if (entity.historyOnly) top.append(el('span','member-task',`历史成员 · 原绑定 ${entity.historyBinding?.sessionId ?? '未明确'}`));
+        if (entity.historyOnly) { const history = el('span','member-task member-history',`历史成员 · 原绑定 ${entity.historyBinding?.sessionId ?? '未明确'}`); history.setAttribute('title', history.textContent); top.append(history); }
         const description = node.kind === 'workflow' ? `${children.length} 个成员 · 显示分组` : entity.runtimeRef ?? entity.nativeId ?? entity.id;
-        top.append(el('span', 'member-id', description));
+        const reference = el('span', 'member-id', description); reference.setAttribute('title', description); top.append(reference);
         top.append(el('span', 'member-task', `记录于 ${time(entity.observedAt)}`));
         const assigned = node.kind === 'member' ? board.tasks.filter(t => t.ownerId === entity.id && t.status !== 'completed') : [];
         if (assigned.length) top.append(el('span', 'member-task', assigned.map(t => `${t.id} · ${t.title}`).join('\n')));
@@ -54,7 +181,18 @@
         return wrap;
       };
       tree.append(...nodes.filter(n => !n.parentId).map(n => branch(n, 0)));
-      $('team-map').replaceChildren(tree);
+      const viewport = $('team-map'), stage = el('div', 'map-stage'), frame = el('div', 'map-frame');
+      frame.append(tree); stage.append(frame); viewport.replaceChildren(stage);
+      this.mapFrame = frame; this.mapTree = tree;
+      this.mapSize = { width: Math.max(1, tree.scrollWidth || 0, tree.offsetWidth || 0), height: Math.max(1, tree.scrollHeight || 0, tree.offsetHeight || 0) };
+      this.mapBoardId = board.id;
+      this.applyMapZoom();
+      if (sameBoard && previousFocus) this.positionMapFocus(previousFocus);
+      else {
+        viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2) || 0;
+        viewport.scrollTop = 0;
+      }
+      this.mapFocus = this.captureMapFocus();
     }
     async open(kind, id) {
       $('task-detail').close();

@@ -1,11 +1,12 @@
 # Validation
 
-The current source is 0.5.5. On Linux, 142 of 144 isolated tests pass; the two
-Windows-only Hook-launch tests are skipped, with zero failures. Release checks use the standard bundled-Hook
-manifests, not a machine-specific user-Hook override. Linux validation covers
-initialization, scope and cancellation, the actual stdio UI handlers, cached
-readers with a deleted backend working directory, and the existing filesystem
-watcher/public-RPC fixtures. Windows-only Hook-launch checks are skipped on Linux.
+The current source is 0.5.6. Its complete isolated Node 24 Linux suite has 145
+tests: 143 pass, two Windows-only checks skip, and zero fail. Release validation
+uses standard bundled-Hook manifests. Windows-only Hook-launch checks are
+skipped on Linux; these are not claimed as Windows acceptance. UI checks cover
+completion values, new-event-only activity effects, canvas controls, fit stability,
+view retention and actual stdio resource/handler behavior.
+
 Run:
 
 ```powershell
@@ -44,3 +45,15 @@ were also checked through that installation's actual MCP connection. These are
 local-installation observations, not a claim that publishing this source installs
 or trusts the standard package. Private receipts, identities and workbench data
 are excluded from the public source and archive.
+
+
+## 0.5.6 UI evidence and limits
+
+The same UI implementation was separately checked with real Chromium in eight
+light/dark viewport cases from 320 to 1440 pixels, including fit idempotence,
+node details, collapse, reset and view retention. Task completion values and
+new-event-only motion were checked against an isolated local preview store.
+A repaired Linux installation's exact current-thread UI response was compared
+against its built assets after a normal supported plugin refresh. That verifies
+its served resource, not the pixels of every already-mounted desktop card.
+Private IDs, runtime receipts and workbench data are not included in this source.

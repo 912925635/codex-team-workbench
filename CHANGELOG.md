@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.6 — interactive canvas and task console
+
+- Add canvas zoom, fit, 100% reset and background drag panning. Keep pan and zoom
+  across refresh and collapse; preserve actual agent-parent and display-group semantics.
+- Distinguish ordinary members, workflow groups and Hook-source observations with
+  shared shape markers. Use neutral hierarchy lines and restrained hover/focus edges.
+- Add a Bento task overview with completion values derived from saved task status,
+  section navigation and activity cards that animate only when new records arrive.
+- Refine light/dark layouts, narrow-screen controls, long-reference tooltips and
+  keyboard/reduced-motion support. Keep the existing UI/tool security boundaries.
+- Version the MCP/UI resource as 0.5.6 and carry a matching UI revision in both MCP
+  declarations so the host can detect updated startup definitions. Cached old
+  connections may need a normal plugin refresh; reopening a card alone is insufficient.
+- Retain all 0.5.5 synchronization initialization fixes, standard reviewable Hooks,
+  exact-identity checks and the existing data-directory resolver.
+- Linux release validation: 143 tests passed, two Windows-only checks skipped,
+  zero failures. The public package passed the source privacy review.
+- Publish an installable ZIP and SHA256 checksums through GitHub Releases. Source
+  publication does not install the package or change any host's Hook trust.
+
 ## 0.5.5 — workbench synchronization initialization
 
 - Create a workbench with an exact originating UUID and confirmed automatic

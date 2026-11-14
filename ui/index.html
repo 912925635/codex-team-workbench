@@ -7,8 +7,8 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brandmark" aria-hidden="true">⌘</span><div><strong>Team Workbench</strong><span class="subtitle">让分工留在对话里</span></div></div>
-    <span id="connection" class="connection">正在连接…</span>
+    <div class="brand"><span class="brandmark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><strong>Team Workbench</strong><span class="subtitle">让分工留在对话里</span></div></div>
+    <span id="connection" class="connection" data-state="connecting">正在连接…</span>
   </header>
   <main>
     <div class="workspace-bar"><div class="workspace-title"><span class="eyebrow">WORKSPACE / 团队</span><h1>团队工作台</h1></div><div class="toolbar"><label class="sr-only" for="board-select">选择工作台</label><select id="board-select"><option value="">选择工作台</option></select><button id="archived-boards">已归档工作台</button><button id="new-board">＋ 工作台</button><button id="refresh" class="icon-button" aria-label="刷新已保存工作台数据" title="重读已保存数据，不主动同步原生会话">↻</button><span id="refresh-status" class="muted" role="status" aria-live="polite"></span></div></div>
@@ -16,20 +16,27 @@
     <div id="error" class="error" role="alert" hidden></div>
     <section id="welcome" class="welcome" hidden><div class="empty-symbol" aria-hidden="true">⌘</div><span class="eyebrow">ONE CONVERSATION, SHARED CONTEXT</span><h2>把任务和团队放在一起</h2><p>先建一个工作台，再添加任务与协作成员。<br>每一条状态都会标明来源。</p><button id="welcome-create" class="primary">创建第一个工作台 <span aria-hidden="true">↗</span></button><div class="welcome-features"><span>01　共享任务</span><span>02　依赖与负责人</span><span>03　团队关系</span></div></section>
     <div id="workspace" hidden>
-      <div class="board-heading"><div><h2 id="board-title"></h2><p id="board-meta" class="muted"></p></div><div class="toolbar"><button id="auto-history" class="text-button">自动同步对话：关</button><button id="bind-session" class="text-button">关联会话标识</button><button id="archive-board" class="text-button">归档工作台</button></div></div>
-      <div class="stats" aria-label="任务统计"><div><span>全部任务</span><strong id="stat-total">0</strong></div><div><span><i class="dot amber"></i>进行中</span><strong id="stat-active">0</strong></div><div><span><i class="dot green"></i>已完成</span><strong id="stat-done">0</strong></div><div><span><i class="dot gray"></i>等待依赖</span><strong id="stat-blocked">0</strong></div></div>
+      <div class="board-heading"><div><h2 id="board-title"></h2><details class="binding-info"><summary>会话绑定与来源</summary><p id="board-meta" class="muted"></p></details></div><div class="toolbar"><button id="auto-history" class="text-button">自动同步对话：关</button><button id="bind-session" class="text-button">关联会话标识</button><button id="archive-board" class="text-button">归档工作台</button></div></div>
+      <nav class="workspace-nav" aria-label="工作台分区"><a href="#tasks-heading">01 <span>共享任务</span></a><a href="#team-heading">02 <span>团队画布</span></a><a href="#activity-heading">03 <span>最近动态</span></a></nav>
+      <div class="stats" aria-label="任务统计">
+        <div class="stat-total"><span class="stat-label">任务概览</span><div class="total-value"><strong id="stat-total">0</strong><span>项已记录任务</span></div><div class="completion-row"><label for="completion-meter">完成率</label><span id="completion-label">0 / 0 · 0%</span></div><meter id="completion-meter" min="0" max="1" value="0" aria-label="已记录任务完成率"></meter></div>
+        <div class="stat-active"><span class="stat-label"><i class="dot amber"></i>进行中</span><strong id="stat-active">0</strong><span class="stat-caption">按已记录任务状态</span></div>
+        <div class="stat-done"><span class="stat-label"><i class="dot green"></i>已完成</span><strong id="stat-done">0</strong><span class="stat-caption">按已记录任务状态</span></div>
+        <div class="stat-blocked"><span class="stat-label"><i class="dot gray"></i>等待依赖</span><strong id="stat-blocked">0</strong><span class="stat-caption">前置条件未就绪</span></div>
+      </div>
       <section class="task-section" aria-labelledby="tasks-heading">
         <div class="section-heading"><div><span class="section-index">01</span><h2 id="tasks-heading">共享任务</h2><span id="task-count" class="count"></span></div><button id="new-task" class="primary">＋ 新建任务</button></div>
         <div class="filters"><div id="owner-filters" class="chips" aria-label="负责人筛选"></div><label class="status-filter">状态 <select id="status-filter"><option value="all">全部</option><option value="pending">待领取</option><option value="in_progress">进行中</option><option value="completed">已完成</option><option value="blocked">等待依赖</option></select></label></div>
+        <div class="task-columns" aria-hidden="true"><span></span><span>任务</span><span class="column-owner">负责人</span><span>状态</span><span></span></div>
         <div id="task-list" class="task-list"></div>
       </section>
       <section class="team-section" aria-labelledby="team-heading">
-        <div class="section-heading"><div><span class="section-index">02</span><h2 id="team-heading">团队关系</h2><span id="member-count" class="count"></span></div><button id="new-member">＋ 记录成员</button></div>
-        <p class="section-note">点击节点查看详情与记录，＋／− 折叠层级。工作流为显示分组，成员实际代理上级单独保留。</p>
+        <div class="section-heading"><div><span class="section-index">02</span><h2 id="team-heading">团队画布</h2><span id="member-count" class="count"></span></div><button id="new-member">＋ 记录成员</button></div>
+        <p class="section-note">连线仅展示当前层级，节点类别看符号标记。工作流为显示分组，不代表已启动子代理；成员实际代理上级单独保留。</p>
         <div id="team-map" class="team-map"></div>
-        <div class="legend"><span><i class="legend-line"></i>已记录的成员关系</span><span><i class="legend-line dashed"></i>hook 的会话关联（非完整调用树）</span></div>
+        <div class="legend" aria-label="节点类别"><span class="legend-item"><span class="relation-marker relation-member" aria-hidden="true"></span>普通成员</span><span class="legend-item"><span class="relation-marker relation-workflow" aria-hidden="true"></span>工作流分组</span><span class="legend-item" title="Hook 来源的会话与生命周期观察记录，非完整调用树"><span class="relation-marker relation-hook" aria-hidden="true"></span>Hook 观察</span></div>
       </section>
-      <details class="activity"><summary>最近动态 <span id="activity-count"></span></summary><ol id="activity-list"></ol></details>
+      <section id="activity-feed" class="activity activity-feed" aria-labelledby="activity-heading"><div class="section-heading"><div><span class="section-index">03</span><h2 id="activity-heading">最近动态</h2><span id="activity-count" class="count"></span></div><span class="activity-note">最近 15 条已记录变更</span></div><ol id="activity-list" tabindex="0" aria-label="最近的工作台变更"></ol></section>
       <footer><span id="sync-state">本地持久化 · 无外部服务</span><span>会话打开与续接由主代理处理，以实际回执为准</span></footer>
     </div>
   </main>

@@ -83,11 +83,18 @@
     const pending=!!b.syncInitialization?.requested;
     $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):pending?(b.rootSessionId?'待接入':'待关联'):'关'}`;
     $('auto-history').disabled=!state.nativeAutoHistory?.available && !automatic && !pending;
+    $('auto-history').setAttribute('aria-pressed', String(Boolean(automatic)));
+    $('auto-history').setAttribute('data-sync-state', automatic ? (state.nativeAutoHistory?.available ? 'enabled' : 'unavailable') : pending ? 'pending' : 'disabled');
     $('auto-history').title=!b.rootSessionId?'关联当前会话并启用自动同步；已登记的主代理身份会自动填入。':state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':state.nativeAutoHistory?.reason ?? '当前后端未提供自动同步条件的详细诊断。';
     if(pending)$('notice').textContent=b.rootSessionId?'已保存自动同步选择，等待宿主同步条件就绪。':'已选择自动同步，等待主代理登记当前会话身份后自动关联并启用。';
     $('stat-total').textContent = b.tasks.length;
     $('stat-active').textContent = b.tasks.filter(t => t.status === 'in_progress').length;
     $('stat-done').textContent = b.tasks.filter(t => t.status === 'completed').length;
+    const completed = b.tasks.filter(t => t.status === 'completed').length;
+    const completion = b.tasks.length ? Math.round(completed / b.tasks.length * 100) : 0;
+    $('completion-meter').max = b.tasks.length || 1; $('completion-meter').value = completed;
+    $('completion-meter').setAttribute('aria-valuetext', `${completed} / ${b.tasks.length} · ${completion}%`);
+    $('completion-label').textContent = `${completed} / ${b.tasks.length} · ${completion}%`;
     $('stat-blocked').textContent = b.tasks.filter(t => !t.ready && t.status !== 'completed').length;
     $('task-count').textContent = `${b.tasks.length} 项`;
     $('member-count').textContent = `${b.members.length} 位 · ${(b.workflows ?? []).length} 个工作流`;
@@ -98,9 +105,21 @@
     $('owner-filters').replaceChildren(...filters);
     renderTasks(); renderMap();
     $('activity-count').textContent = `· ${b.events.length}`;
-    $('activity-list').replaceChildren(...b.events.slice(-15).reverse().map(e => {
-      const row = el('li'); row.append(el('time', '', time(e.at)), el('span', '', e.detail)); return row;
+    const activityKinds = {task_created:'新任务',task_updated:'任务更新',member_report:'成员记录',workflow_report:'工作流',execution_requested:'执行请求',execution_updated:'执行记录',session_bound:'会话绑定',identity_resolution:'身份关联'};
+    const activityKey = e => JSON.stringify([e.at, e.kind, e.detail]);
+    const sameActivityBoard = state.activityBoardId === b.id;
+    const previousEvents = sameActivityBoard ? state.activityKeys : null;
+    const activity = b.events.slice(-15).reverse();
+    $('activity-list').replaceChildren(...activity.map(e => {
+      const arrived = previousEvents && !previousEvents.has(activityKey(e));
+      const row = el('li', `activity-card${arrived ? ' activity-new' : ''}`);
+      row.setAttribute('data-event-kind', e.kind ?? 'record');
+      const meta = el('div', 'activity-meta');
+      meta.append(el('span', 'activity-kind', activityKinds[e.kind] ?? '记录'), el('time', '', time(e.at)));
+      row.append(meta, el('span', 'activity-detail', e.detail)); return row;
     }));
+    if (!activity.length) $('activity-list').append(el('li', 'activity-empty', '暂无动态，任务与成员的变更会显示在这里。'));
+    state.activityBoardId = b.id; state.activityKeys = new Set(activity.map(activityKey));
     if ($('task-detail').open && state.activeTask) renderDetail(state.activeTask);
   }
   function renderTasks() {
@@ -355,7 +374,8 @@
   (async () => {
     try {
       await bridge.connect();
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.5 · 未连接宿主' : '插件协议已连接 · 0.5.5';
+      $('connection').setAttribute('data-state', bridge.preview ? 'preview' : 'ready');
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.6 · 未连接宿主' : '插件协议已连接 · 0.5.6';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';
@@ -368,6 +388,6 @@
           if (older) showError(new Error('此桌面版本低于 Extensions 建议版本 26.928.20710，请更新后验证会话面板功能。'));
         }
       }
-    } catch (e) { $('connection').textContent = '尚未连接'; $('notice').textContent = '连接未完成。工作台不会显示模拟团队。'; showError(e); }
+    } catch (e) { $('connection').setAttribute('data-state', 'unavailable'); $('connection').textContent = '尚未连接'; $('notice').textContent = '连接未完成。工作台不会显示模拟团队。'; showError(e); }
   })();
 })();

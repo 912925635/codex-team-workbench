@@ -2,8 +2,13 @@
   "mcpServers": {
     "team-workbench": {
       "command": "node",
-      "args": ["${PLUGIN_ROOT}/src/server.mjs"],
-      "cwd": "${PLUGIN_ROOT}"
+      "args": [
+        "${PLUGIN_ROOT}/src/server.mjs"
+      ],
+      "cwd": "${PLUGIN_ROOT}",
+      "env": {
+        "TEAM_WORKBENCH_UI_REVISION": "0.5.6"
+      }
     }
   }
 }

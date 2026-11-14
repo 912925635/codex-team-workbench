@@ -1,11 +1,11 @@
-/* Session browser additions. The user's existing style.css is retained unchanged. */
+/* Session browser and node-type markers. Connectors show display hierarchy only. */
 .browse-branch-head{position:relative;display:flex;align-items:center}
-.browse-card{padding:0;display:block;white-space:normal;color:var(--ink)}
+.browse-card{appearance:none;padding:0;display:block;white-space:normal;color:var(--ink)}
 .browse-card .member-top,.browse-card .member-name,.browse-card .member-id,.browse-card .member-task{display:block}
 .browse-card .member-task{white-space:pre-wrap}
-.browse-disclosure{position:absolute;right:calc(100% + 5px);padding:0;width:23px;height:23px;font-size:16px;border-radius:50%;z-index:1}
-.browse-workflow>.browse-branch-head>.browse-card{border-style:dashed;background:var(--accent-soft)}
-.browse-workflow:before,.browse-workflow:after{border-style:dashed}
+.browse-card .member-history{white-space:nowrap}
+.browse-disclosure{position:absolute;right:calc(100% + 5px);padding:0;min-height:24px;width:24px;height:24px;font-size:16px;border-radius:50%;z-index:1}
+.browse-workflow>.browse-branch-head>.browse-card{background:color-mix(in srgb,var(--relation-workflow) 3%,var(--surface))}
 #node-detail{width:min(760px,calc(100% - 32px))}
 #node-body p{font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}
 #node-body h3{margin:24px 0 12px;font-size:14px}
@@ -15,10 +15,48 @@
 .browse-execution{padding-bottom:14px}
 .browse-result{white-space:pre-wrap;overflow-wrap:anywhere}
 .browse-history{display:block;width:100%;margin:12px 0}
-@media(max-width:520px){#node-body .detail-grid{grid-template-columns:1fr}.browse-disclosure{right:calc(100% + 2px);width:20px;height:20px}}
+@media(max-width:520px){#node-body .detail-grid{grid-template-columns:1fr}.browse-disclosure{right:calc(100% + 2px);width:24px;height:24px}}
+
+/* Lightweight canvas controls and a layout-aware scale frame keep scrolling stable. */
+.map-controls{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin:0 20px 8px;color:var(--muted);font-size:11px}
+.map-control{min-width:34px;min-height:34px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);line-height:1}
+.map-control:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 45%,var(--line));background:var(--hover)}
+.map-control:disabled{opacity:.5;cursor:not-allowed}
+.map-zoom-readout{min-width:45px;text-align:center;font-variant-numeric:tabular-nums;color:var(--muted)}
+.map-control-fit{margin-left:4px}
+.team-map{height:min(60vh,620px);min-height:270px}
+.browse-card{--node-accent:var(--relation-member);transition:border-color .14s ease,box-shadow .14s ease}
+.browse-card:hover{border-color:var(--node-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--node-accent) 15%,transparent),0 5px 15px #101d3014}
+.browse-workflow>.browse-branch-head>.browse-card{--node-accent:var(--relation-workflow)}
+.tree-branch.hook>.browse-branch-head>.browse-card{--node-accent:var(--relation-hook)}
+.browse-card:focus-visible{position:relative;z-index:3;outline:2px solid var(--node-accent);outline-offset:3px;box-shadow:none}
+.map-stage{position:relative;display:flex;align-items:flex-start;justify-content:center;width:max-content;min-width:100%;min-height:210px}
+.map-frame{position:relative;flex:0 0 auto}
+.team-map .map-tree{position:absolute;left:0;top:0;width:max-content;margin:0;transform-origin:top left}
+.team-map.map-panning{cursor:grabbing;user-select:none}
+.team-map.map-panning *{cursor:grabbing!important;user-select:none!important}
+.team-map .tree-children>.tree-branch>.browse-branch-head:after{content:"";position:absolute;left:50%;top:-20px;z-index:2;width:7px;height:7px;box-sizing:border-box;border:1px solid var(--tree-line);border-radius:50%;background:var(--soft);transform:translateX(-50%)}
+.tree-branch:before,.tree-branch:after,.tree-children:before{border-color:var(--tree-line)}
+@media(max-width:760px){.map-controls{margin-left:16px;margin-right:16px}}
+@media(max-width:520px){.map-controls{gap:4px;margin-bottom:7px}.map-control{min-width:34px;min-height:36px}.map-control-fit{margin-left:0}}
+@media(prefers-reduced-motion:reduce){.browse-card{transition:none}}
 
 /* Animate only a fresh, explicitly observed native running state. */
-.tree-branch.runtime-active:before,.tree-branch.runtime-active:after{border-color:var(--accent);animation:runtime-pulse 1.2s ease-in-out infinite}
-@keyframes runtime-pulse{0%,100%{opacity:.35}50%{opacity:1}}
-@media(prefers-reduced-motion:reduce){.tree-branch.runtime-active:before,.tree-branch.runtime-active:after{animation:none;opacity:1}}
+.tree-branch.runtime-active>.browse-branch-head>.browse-card{border-color:var(--accent);animation:runtime-pulse 1.8s ease-in-out infinite}
+@keyframes runtime-pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 12%,transparent)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}}
+@media(prefers-reduced-motion:reduce){.tree-branch.runtime-active>.browse-branch-head>.browse-card{animation:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}}
 .browse-resume-form{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.browse-resume-form textarea{min-width:240px;min-height:70px;flex:1}
+
+/* Shapes distinguish node types even in monochrome; color is supplementary. */
+:root{--relation-member:#496cb9;--relation-workflow:#946529;--relation-hook:#875ba2;--tree-line:color-mix(in srgb,var(--muted) 42%,var(--paper));--tree-dot:color-mix(in srgb,var(--muted) 23%,transparent)}
+html[data-theme="dark"]{--relation-member:#a4bcff;--relation-workflow:#d9b985;--relation-hook:#c7aded}
+.member-role{align-items:center;gap:8px}
+.member-kind{display:inline-flex;align-items:center;gap:6px;min-width:0;line-height:1.5}
+.relation-marker{display:inline-flex;align-items:center;justify-content:center;flex:0 0 22px;width:22px;height:22px;border-radius:6px;color:var(--relation-member);background:color-mix(in srgb,currentColor 10%,transparent)}
+.relation-marker:before{content:"";display:block;box-sizing:border-box;width:9px;height:9px;border:1.5px solid currentColor}
+.relation-marker.relation-member:before{border-radius:50%}
+.relation-marker.relation-workflow{color:var(--relation-workflow)}
+.relation-marker.relation-workflow:before{border-radius:2px}
+.relation-marker.relation-hook{color:var(--relation-hook)}
+.relation-marker.relation-hook:before{width:8px;height:8px;border-radius:1px;transform:rotate(45deg)}
+.legend-item{display:inline-flex;align-items:center;gap:7px;padding:3px 0;margin-right:12px;line-height:1.4}

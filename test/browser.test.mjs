@@ -6,20 +6,31 @@ import { sessionTree } from '../src/browse.mjs';
 import { historySyncPlan } from '../src/history-sync.mjs';
 // Deterministic DOM contract fixture. No browser/desktop control or visual test.
 class Element {
-  constructor(tag = 'div') { this.tagName = tag; this.children = []; this.attributes = {}; this.open = false; this.hidden = false; this._text = ''; }
+  constructor(tag = 'div') {
+    this.tagName = tag; this.children = []; this.attributes = {}; this.open = false; this.hidden = false; this._text = '';
+    this.style = {}; this.offsetWidth = 800; this.scrollWidth = 800; this.offsetHeight = 500; this.scrollHeight = 500;
+    this.clientWidth = 600; this.clientHeight = 280; this.scrollLeft = 0; this.scrollTop = 0; this.listeners = {};
+    this.className = ''; this.classList = { add: value => { if (!this.className.split(/\s+/).includes(value)) this.className = `${this.className} ${value}`.trim(); }, remove: value => { this.className = this.className.split(/\s+/).filter(v => v !== value).join(' '); } };
+  }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
   set innerHTML(_) { throw new Error('Record text must not become executable HTML'); }
-  append(...nodes) { this.children.push(...nodes); }
-  replaceChildren(...nodes) { this._text = ''; this.children = [...nodes]; }
+  append(...nodes) { for (const node of nodes) { node.parentNode?.removeChild?.(node); node.parentNode = this; this.children.push(node); } }
+  replaceChildren(...nodes) { for (const child of this.children) child.parentNode = null; this._text = ''; this.children = []; this.append(...nodes); }
+  insertBefore(node, reference) { node.parentNode?.removeChild?.(node); node.parentNode = this; const index = this.children.indexOf(reference); this.children.splice(index < 0 ? this.children.length : index, 0, node); return node; }
+  removeChild(node) { const index = this.children.indexOf(node); if (index >= 0) this.children.splice(index, 1); node.parentNode = null; return node; }
   setAttribute(k, v) { this.attributes[k] = v; }
-  addEventListener() {}
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  addEventListener(name, fn) { (this.listeners[name] ??= []).push(fn); }
+  dispatch(name, event) { for (const fn of this.listeners[name] ?? []) fn(event); }
+  querySelectorAll(selector) { return walk(this).filter(node => selector === '.map-control' && node.className.split(/\s+/).includes('map-control')); }
   close() { this.open = false; }
   showModal() { this.open = true; }
 }
 function walk(node) { return [node, ...node.children.flatMap(walk)]; }
 function fixture(call) {
   const ids = Object.fromEntries(['team-map','node-title','node-body','node-detail','close-node','task-detail'].map(id => [id, new Element()]));
+  const section = new Element('section'); section.append(ids['team-map']);
   const document = { getElementById: id => ids[id], createElement: tag => new Element(tag) };
   const context = { document }; vm.runInNewContext(readFileSync(new URL('../ui/browser.js', import.meta.url), 'utf8'), context);
   const board = { id: 'fixture-board', tasks: [], members: [
@@ -43,6 +54,43 @@ test('actual tree renderer nests grandchildren/groups, toggles branches and open
   const card = walk(f.ids['team-map']).find(e=>e.attributes['aria-label']==='查看成员：Fixture grandchild');
   await card.onclick(); assert.equal(selected.nodeId,'grandchild'); assert.equal(f.ids['node-detail'].open,true);
   assert(f.ids['node-body'].textContent.includes('尚未绑定原生会话'));
+});
+test('canvas controls fit, zoom, reset, preserve manual pan, and keep Hook associations as roots', () => {
+  const f = fixture(async () => ({}));
+  f.board.members.push({ id:'hook-root',name:'Hook association root',parentId:'lead',relation:'session_association',source:'hook',status:'unknown' });
+  f.board.sessionTree = sessionTree(f.board);
+  f.browser.renderMap();
+  const controls = f.ids['team-map'].parentNode.children.find(node => node.attributes.role === 'toolbar');
+  assert(controls, 'renderer creates an accessible toolbar before the viewport');
+  const control = label => walk(controls).find(node => node.attributes['aria-label'] === label);
+  assert.equal(typeof control('放大画布').onclick, 'function');
+  assert.equal(f.browser.mapSize.width, 800); assert.equal(f.browser.mapSize.height, 500);
+
+  control('适应画布').onclick();
+  assert.equal(f.browser.mapZoom, 0.55);
+  assert.equal(f.browser.mapReadout.textContent, '55%');
+  control('重置画布到 100%').onclick();
+  assert.equal(f.browser.mapZoom, 1);
+  control('放大画布').onclick(); assert.equal(f.browser.mapZoom, 1.1);
+
+  const viewport = f.ids['team-map']; viewport.scrollLeft = 90; viewport.scrollTop = 35;
+  viewport.dispatch('pointerdown', { button:0,pointerType:'mouse',pointerId:7,clientX:120,clientY:80,target:viewport });
+  viewport.dispatch('pointermove', { pointerId:7,clientX:80,clientY:55 });
+  viewport.dispatch('pointerup', { pointerId:7 });
+  assert.equal(viewport.scrollLeft, 130); assert.equal(viewport.scrollTop, 60);
+  f.browser.renderMap();
+  assert.equal(f.browser.mapZoom, 1.1);
+  assert.equal(viewport.scrollLeft, 130); assert.equal(viewport.scrollTop, 60);
+  viewport.clientWidth = 180;
+  control('适应画布').onclick(); const narrowFit = f.browser.mapZoom;
+  control('适应画布').onclick();
+  assert.equal(narrowFit, 0.22, 'narrow view can fit a wide tree below the normal zoom-out range');
+  assert.equal(f.browser.mapZoom, narrowFit, 'fit stays stable when repeated');
+
+  const tree = viewport.children[0].children[0].children[0];
+  const hookBranch = walk(tree).find(node => node.className.includes('tree-branch') && node.className.includes('hook'));
+  assert.equal(hookBranch.parentNode, tree, 'session_association is rendered as an independent root');
+  assert(walk(hookBranch).some(node => node.className.includes('relation-hook')));
 });
 test('record reader pages reported text safely and never labels it a complete native transcript', async () => {
   const calls=[];

@@ -1,6 +1,6 @@
 {
   "name": "team-workbench",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Native team workbench with reviewed lifecycle hooks, task execution and source-labeled session browsing.",
   "author": {
     "name": "Team Workbench contributors"
@@ -11,7 +11,7 @@
   "interface": {
     "displayName": "Team Workbench",
     "shortDescription": "Tasks and team in one place",
-    "longDescription": "Shared tasks, source-labeled native members, multilevel parent relationships and workflow groups. Reviewed metadata-only hooks update running and idle states. Navigation and continuation require supported host tools and exact-target receipts. Visible history is bounded and lead-mediated. Full GitHub-installed desktop UI acceptance remains unverified.",
+    "longDescription": "Shared tasks, a zoomable team canvas, source-labeled members and workflow groups. Reviewed metadata-only hooks update running and idle states. Navigation and continuation require supported host tools and exact-target receipts. Visible history is bounded and lead-mediated. Full GitHub-installed desktop UI acceptance remains unverified.",
     "developerName": "Team Workbench contributors",
     "category": "Productivity",
     "capabilities": [

@@ -47,7 +47,7 @@ test('inline history cards preserve fullscreen support and the manual thread ent
   const tool = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   assert.deepEqual(tool._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
   const uris = [tool._meta.ui.resourceUri, 'ui://team-workbench/panel',
-    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', 'ui://team-workbench/panel/0.5.4', tool._meta.ui.resourceUri];
+    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', 'ui://team-workbench/panel/0.5.4', 'ui://team-workbench/panel/0.5.5', tool._meta.ui.resourceUri];
   for (const uri of uris) {
     const response = await c.request('resources/read', { uri });
     assert.equal(response.error, undefined);
@@ -73,7 +73,7 @@ test('a running MCP connection retains its complete UI after an upgrade prunes i
   const before = (await resource(c)).result.contents[0];
   assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
-  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3','0.5.4']){
+  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3','0.5.4','0.5.5']){
     const oldUri=`ui://team-workbench/panel/${version}`;
     const alias=await c.request('resources/read',{uri:oldUri});
     assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
@@ -97,7 +97,7 @@ test('missing UI files return an error with the original request ID while task t
 });
 
 class Element {
-  constructor(tag = 'div', text = '') { this.tagName = tag; this.children = []; this.attributes = {}; this.open = false; this.hidden = false; this._text = text; }
+  constructor(tag = 'div', text = '') { this.tagName = tag; this.children = []; this.attributes = {}; this.open = false; this.hidden = false; this._text = text; this.style = {}; }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
   append(...nodes) { this.children.push(...nodes); }
@@ -113,7 +113,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   const c = fixture(t,{automaticHistory:true}); await initialize(c);
   const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.5');
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.6');
   const legacy = await resource(c);
   assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
   const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
@@ -155,14 +155,19 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   assert.deepEqual(methods, ['ui/initialize', 'tools/call']);
   assert.equal(ids['board-title'].textContent, 'Full resource fixture');
   assert.equal(ids['stat-total'].textContent, '1');
+  assert.equal(ids['completion-label'].textContent,'0 / 1 · 0%');
+  assert.equal(ids['completion-meter'].value,0);assert.equal(ids['completion-meter'].max,1);
+  assert(!ids['activity-list'].children.some(n=>n.className?.includes('activity-new')),'initial activity must not replay as new');
   assert(ids['task-list'].textContent.includes('Resource fixture task'));
-  assert.equal(ids['error'].hidden, true);
+  assert.equal(ids['error'].hidden, true, ids['error'].textContent);
   const walk=n=>[n,...n.children.flatMap(walk)];
   await ids['refresh'].onclick();
   assert(ids['refresh-status'].textContent.includes('数据未变化'));
   await c.request('tools/call',{name:'team_create_task',arguments:{boardId:board.id,title:'External refresh change'}});
   await ids['refresh'].onclick();
   assert(ids['refresh-status'].textContent.includes('数据已更新'));assert.equal(ids['stat-total'].textContent,'2');
+  assert.equal(ids['activity-list'].children.filter(n=>n.className?.includes('activity-new')).length,1);
+  await ids['refresh'].onclick();assert(!ids['activity-list'].children.some(n=>n.className?.includes('activity-new')),'unchanged refresh must not replay animation');
   holdSnapshot=true;const count=methods.length,pendingRefresh=ids['refresh'].onclick();
   assert.equal(ids['refresh'].disabled,true);assert(ids['refresh-status'].textContent.includes('正在刷新'));
   await ids['refresh'].onclick();assert.equal(methods.length,count+1);
@@ -183,7 +188,7 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   ids['new-task'].onclick();fieldByName('title').value='Direct CRUD fixture';fieldByName('description').value='PRIVATE_TASK_INSTRUCTIONS_FIXTURE';await submit();
   let saved=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board;
   assert(saved.tasks.some(t=>t.title==='Direct CRUD fixture'));
-  openTask('Direct CRUD fixture');await clickDetail('由协调者领取');await clickDetail('释放任务');await clickDetail('由协调者领取');await clickDetail('标记完成');await clickDetail('重新打开');
+  openTask('Direct CRUD fixture');await clickDetail('由协调者领取');await clickDetail('释放任务');await clickDetail('由协调者领取');await clickDetail('标记完成');assert.equal(ids['completion-label'].textContent,'1 / 3 · 33%');assert.equal(ids['completion-meter'].value,1);await clickDetail('重新打开');
   await clickDetail('编辑');fieldByName('title').value='Edited direct CRUD fixture';await submit();
   openTask('Edited direct CRUD fixture');await clickDetail('转派');fieldByName('ownerId').value='lead';await submit();
   openTask('Edited direct CRUD fixture');await clickDetail('释放任务');await clickDetail('编辑依赖');await submit();
