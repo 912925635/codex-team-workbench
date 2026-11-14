@@ -4,7 +4,15 @@ A local MCP workbench for native Codex collaborators, inspired by DeepSeek Harne
 Tasks, lifecycle observations, exact parent relationships and source-labeled records
 share one conversation panel.
 
-**0.5.5 修复新工作台的同步初始化、缓存更新后的读取目录，以及监视状态恢复。**
+**0.5.6 新增交互团队画布、真实任务完成率和活动卡片，并改进插件更新后的界面识别。**
+
+- 画布支持缩放、适应、100% 复位与拖动平移；刷新保留视图。
+- 圆形、方形与菱形区分普通成员、工作流分组和 Hook 来源观察。
+- 任务概览由真实已记录任务计算完成率；活动动效只在新记录到达时出现。
+- 发布使用独立的 0.5.6 UI 资源地址和 MCP 页面修订标记。
+- [界面与更新说明](docs/UI.md) · [GitHub Releases](https://github.com/912925635/codex-team-workbench/releases)
+
+0.5.5 的同步初始化、稳定读取目录与监视状态恢复修复继续保留。
 Linux 原生 Hook 与后台读取链路已在一个授权安装范围内验证；标准安装仍需宿主正常
 审阅 Hook。GitHub 源码发布、客户端安装和实际连接重载分别处理。原稳定源码可追溯至
 [`3a66a9a`](https://github.com/912925635/codex-team-workbench/commit/3a66a9accb0a8ae9fb6dc54fefad1b45d5424d29)。

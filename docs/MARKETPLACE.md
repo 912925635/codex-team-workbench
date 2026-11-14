@@ -7,7 +7,7 @@ is `.agents/plugins/marketplace.json`, with one plugin at `source.path: "./"`.
 Paths are relative to the repository root, not the manifest directory.
 The marketplace name is `codex-team-workbench`; the plugin name is
 `team-workbench`. Preserve both when updating. Portable `plugin.json` and native
-`.codex-plugin/plugin.json` declare the same version, currently `0.5.5`.
+`.codex-plugin/plugin.json` declare the same version, currently `0.5.6`.
 
 ## Add or update the source
 
@@ -40,7 +40,7 @@ the same schedule, one-click update control, unattended plugin upgrade or live
 MCP hot reload. These are host capabilities, not a marketplace-manifest setting.
 This project installs no separate updater, edits no host cache and does not
 restart the client. Use the actual supported source-sync/update controls and
-verify the resulting panel reports **插件协议已连接 · 0.5.5**.
+verify the resulting panel reports **插件协议已连接 · 0.5.6**.
 
 ## Preserve history
 
@@ -71,3 +71,16 @@ remain unverified; a successful source push is not their acceptance result.
 
 Official references: [package and local marketplace format](https://developers.openai.com/plugins/build/plugins),
 [workspace GitHub sync](https://learn.chatgpt.com/docs/enterprise/plugin-management).
+
+
+## Versioned GitHub Releases
+
+Formal releases are listed at
+https://github.com/912925635/codex-team-workbench/releases.
+The 0.5.6 release includes an installable ZIP and SHA256 checksums. Keep the same
+existing plugin identity and verify its original data root when updating.
+A source update, plugin installation refresh, per-thread MCP reconnection and an
+already-mounted card repaint are separate stages. To diagnose a stale view,
+compare the exact current thread's returned UI resource, not only a fresh global
+MCP connection. Use the host's normal plugin refresh/update flow, then reopen the
+panel. Do not edit trust records or stop the native runtime to bypass this step.
