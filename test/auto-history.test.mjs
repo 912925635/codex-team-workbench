@@ -19,7 +19,7 @@ async function waitFor(condition) {
 function fixture(t,reader=async()=>page(),extra={}) {
   const dir=mkdtempSync(join(tmpdir(),'workbench-auto-history-')),config={sessionIds:[root],dataDirectory:join(dir,'journal')};mkdirSync(config.dataDirectory);
   const store=new Store(join(dir,'boards'),{nativeEventJournal:join(config.dataDirectory,'native-events-probe.sqlite'),nativeMetadataReader:()=>metadata,nativeHistoryAsyncReader:reader,...extra});
-  t.after(()=>{store.close();assert(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});});
+  t.after(()=>{if(store.db.isOpen)store.close();assert(resolve(dir).startsWith(resolve(tmpdir())+sep));rmSync(dir,{recursive:true,force:true});});
   let b=store.create('Synthetic automatic history fixture');b=store.bind(b.id,root,b.revision);
   store.reportMember(b.id,{memberId:'child',name:'Child fixture',parentId:'lead',nativeId:child,runtimeRef:'/root/auto_fixture',status:'unknown',evidence:'Synthetic exact identity'});
   const configure=enabled=>dispatch(store,'team_set_history_sync',{boardId:b.id,expectedRevision:store.read(b.id).revision,expectedRootSessionId:root,enabled,confirmed:true});
@@ -52,6 +52,67 @@ test('automatic history is opt-in with exact root confirmation and never collect
   assert.throws(()=>dispatch(f.store,'team_set_history_sync',{...args,confirmed:true,expectedRootSessionId:child}),{code:'THREAD_BINDING_REQUIRED'});
   f.store.transact(f.id,b=>{b.members.find(m=>m.id==='child').runtimeObservation.state='running';});
   f.configure(true);await new Promise(r=>setTimeout(r,10));assert.equal(calls,0);
+});
+
+test('bound consent survives a Store restart with the reader offline and syncs on a later snapshot',async t=>{
+  let available=false,calls=0;
+  const reader=async()=>{calls++;return page();};
+  const nativeReaderStatus=()=>({available,code:available?'PUBLIC_READER_PROVIDED':'PUBLIC_SOCKET_MISSING',message:'Synthetic reader state'});
+  const f=fixture(t,reader,{nativeReaderStatus});
+  f.stop();
+  const expectedRevision=f.store.read(f.id).revision;
+  const args={boardId:f.id,expectedRootSessionId:root,expectedRevision,enabled:true,confirmed:true};
+  for (const [overrides,code] of [[{expectedRootSessionId:''},'THREAD_BINDING_REQUIRED'],[{expectedRootSessionId:child},'THREAD_BINDING_REQUIRED'],
+    [{expectedRevision:expectedRevision-1},'STALE_REVISION'],[{confirmed:false},'CONFIRMATION_REQUIRED']]) {
+    assert.throws(()=>dispatch(f.store,'team_set_history_sync',{...args,...overrides}),{code});
+  }
+  assert.equal(f.store.read(f.id).revision,expectedRevision);
+  const pending=f.configure(true);
+  assert.equal(pending.board.syncInitialization.state,'waiting-for-reader');
+  assert.equal(pending.board.syncInitialization.rootThreadId,root);
+  assert.equal(pending.nativeAutoHistory.enabled,false);
+  const journal=f.store.nativeEventJournal;
+  f.store.close();
+
+  const reopened=new Store(f.directory,{nativeEventJournal:journal,nativeMetadataReader:()=>metadata,nativeHistoryAsyncReader:reader,nativeReaderStatus});
+  try {
+    const snapshot=()=>dispatch(reopened,'team_snapshot',{boardId:f.id});
+    assert.equal(snapshot().board.syncInitialization.requested,true);
+    assert.equal(calls,0);
+    available=true;
+    const recovered=snapshot();
+    assert.equal(recovered.board.syncInitialization.requested,false);
+    assert.equal(recovered.nativeAutoHistory.enabled,true);
+    await waitFor(()=>reopened.read(f.id).members.find(m=>m.id==='child').nativeHistoryRead?.autoEventKey);
+    assert.equal(calls,1);
+  } finally { reopened.close(); }
+});
+
+test('existing unbound boards accept scoped consent and cancellation while waiting for a lead identity',t=>{
+  const f=fixture(t),board=f.store.create('Synthetic existing unbound board');
+  const configure=(expectedRootSessionId,enabled)=>dispatch(f.store,'team_set_history_sync',{
+    boardId:board.id,expectedRevision:f.store.read(board.id).revision,expectedRootSessionId,enabled,confirmed:true});
+  assert.throws(()=>configure(root,true),{code:'THREAD_BINDING_REQUIRED'});
+  const pending=configure('',true);
+  assert.equal(pending.board.rootSessionId,null);
+  assert.equal(pending.board.syncInitialization.state,'waiting-for-identity');
+  assert.equal(pending.board.syncInitialization.requested,true);
+  assert.equal(pending.nativeAutoHistory.enabled,false);
+  assert.equal(configure('',false).board.syncInitialization.state,'cancelled');
+  const bound=dispatch(f.store,'team_report_member',{boardId:board.id,memberId:'lead',name:'Lead fixture',status:'unknown',nativeId:root,nativeIdSource:'host-env',evidence:'Synthetic exact identity'});
+  assert.equal(bound.board.rootSessionId,root);
+  assert.equal(bound.nativeAutoHistory.enabled,false);
+});
+
+test('cancelling pending consent on a bound board survives reader recovery',t=>{
+  let available=false;
+  const f=fixture(t,async()=>page(),{nativeReaderStatus:()=>({available,message:'Synthetic reader state'})});
+  f.configure(true);
+  const cancelled=f.configure(false);
+  assert.equal(cancelled.board.syncInitialization.requested,false);
+  assert.equal(cancelled.board.syncInitialization.state,'cancelled');
+  available=true;
+  assert.equal(dispatch(f.store,'team_snapshot',{boardId:f.id}).nativeAutoHistory.enabled,false);
 });
 
 test('disabling while a read is in flight prevents the late page from being saved',async t=>{

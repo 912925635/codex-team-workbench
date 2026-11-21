@@ -38,7 +38,7 @@ public static class WorkbenchMetadataReader {
         doc.Dispose(); // Unrequested notifications are neither retained nor printed.
       }
     }
-    await Send(new {id=1,method="initialize",@params=new {clientInfo=new {name="team_workbench_readonly",version="0.5.6"}}});
+    await Send(new {id=1,method="initialize",@params=new {clientInfo=new {name="team_workbench_readonly",version="0.5.7"}}});
     using var init=await Response(1);
     if(init.RootElement.TryGetProperty("error",out var initErr)) throw new IOException("initialize RPC error " + initErr.GetProperty("code").GetRawText());
     await Send(new {method="initialized",@params=new {}});
@@ -58,13 +58,16 @@ public static class WorkbenchMetadataReader {
       var visited=new System.Collections.Generic.HashSet<string>();
       if(!rows.ContainsKey(rootId))throw new IOException("Bound root metadata unavailable");
       while(current!=rootId) {
-        if(!visited.Add(current) || !rows.TryGetValue(current,out var row) || !row.TryGetProperty("parentThreadId",out var p) || p.ValueKind!=JsonValueKind.String)throw new IOException("Exact bound parent chain unavailable");
-        string parent=p.GetString();
-        if(row.TryGetProperty("source",out var source) && source.ValueKind==JsonValueKind.Object && source.TryGetProperty("subAgent",out var sub) && sub.TryGetProperty("thread_spawn",out var spawn)) {
-          if(spawn.TryGetProperty("parent_thread_id",out var declared) && declared.GetString()!=parent)throw new IOException("Conflicting parent metadata");
-          if(current==target && !String.IsNullOrEmpty(expectedPath) && spawn.TryGetProperty("agent_path",out var agentPath) && agentPath.GetString()!=expectedPath)throw new IOException("Runtime path mismatch");
+        if(!visited.Add(current) || !rows.TryGetValue(current,out var row))throw new IOException("Exact bound parent chain unavailable");
+        string direct=row.TryGetProperty("parentThreadId",out var p) ? p.GetString() : null;
+        string spawned=null;
+        if(row.TryGetProperty("source",out var source) && source.ValueKind==JsonValueKind.Object && source.TryGetProperty("subAgent",out var sub) && sub.ValueKind==JsonValueKind.Object && sub.TryGetProperty("thread_spawn",out var spawn) && spawn.ValueKind==JsonValueKind.Object) {
+          if(spawn.TryGetProperty("parent_thread_id",out var declared))spawned=declared.GetString();
+          if(current==target && !String.IsNullOrEmpty(expectedPath) && spawn.TryGetProperty("agent_path",out var agentPath) && agentPath.ValueKind!=JsonValueKind.Null && agentPath.GetString()!=expectedPath)throw new IOException("Runtime path mismatch");
         }
-        current=parent;
+        if(direct!=null && spawned!=null && direct!=spawned)throw new IOException("Conflicting parent metadata");
+        current=direct??spawned;
+        if(!Guid.TryParseExact(current,"D",out _))throw new IOException("Exact bound parent chain unavailable");
       }
       var args=new System.Collections.Generic.Dictionary<string,object>{{"threadId",target},{"limit",1},{"sortDirection","desc"},{"itemsView","full"}};
       if(!String.IsNullOrEmpty(cursor))args["cursor"]=cursor;

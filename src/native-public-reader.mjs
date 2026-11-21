@@ -136,14 +136,25 @@ function openPublicSocket(socketPath, { signal, timeoutMs = 15000 } = {}) {
 function metadata(thread, expected) {
   if (!thread || thread.id !== expected) throw failure('PUBLIC_ID_MISMATCH', 'Public thread/read identity mismatch');
   const row = { id: expected };
-  if (typeof thread.parentThreadId === 'string') row.parentThreadId = thread.parentThreadId;
   const source = thread.source?.subAgent?.thread_spawn;
+  if ((thread.parentThreadId != null && typeof thread.parentThreadId !== 'string') ||
+      (source?.parent_thread_id != null && typeof source.parent_thread_id !== 'string'))
+    throw failure('PUBLIC_PARENT_UNVERIFIED', 'Invalid public parent metadata');
+  if (typeof thread.parentThreadId === 'string') row.parentThreadId = thread.parentThreadId;
   if (source && typeof source === 'object') {
     const spawn = {};
     for (const key of ['parent_thread_id', 'agent_path']) if (typeof source[key] === 'string') spawn[key] = source[key];
     row.source = { subAgent: { thread_spawn: spawn } };
   }
   return row;
+}
+
+export function publicParent(row) {
+  const direct = row?.parentThreadId, spawned = row?.source?.subAgent?.thread_spawn?.parent_thread_id;
+  if (direct != null && spawned != null && direct !== spawned) return {reason:'conflicting-parent-metadata'};
+  const parentId = direct ?? spawned;
+  if (typeof parentId !== 'string' || !UUID.test(parentId)) return {reason:'parent-metadata-unavailable'};
+  return {parentId};
 }
 
 function visiblePage(data) {
@@ -171,7 +182,7 @@ function visiblePage(data) {
 export async function readPublicRequest(input, options = {}) {
   const request = validateRequest(input), socket = await openPublicSocket(options.socketPath ?? controlSocketPath(), options);
   try {
-    await socket.request('initialize', { clientInfo: { name: 'team_workbench_readonly', version: '0.5.6' } });
+    await socket.request('initialize', { clientInfo: { name: 'team_workbench_readonly', version: '0.5.7' } });
     socket.initialized();
     const threads = [], rows = new Map();
     for (const id of request.threadIds) {
@@ -185,11 +196,12 @@ export async function readPublicRequest(input, options = {}) {
     if (!rows.has(request.rootThreadId)) throw failure('PUBLIC_PARENT_UNVERIFIED', 'Bound root metadata unavailable');
     while (current !== request.rootThreadId) {
       const row = rows.get(current), spawn = row?.source?.subAgent?.thread_spawn;
-      if (seen.has(current) || seen.size >= 100 || !row || !UUID.test(row.parentThreadId ?? '')) throw failure('PUBLIC_PARENT_UNVERIFIED', 'Exact bound parent chain unavailable');
+      if (seen.has(current) || seen.size >= 100 || !row) throw failure('PUBLIC_PARENT_UNVERIFIED', 'Exact bound parent chain unavailable');
       seen.add(current);
-      if (spawn?.parent_thread_id && spawn.parent_thread_id !== row.parentThreadId) throw failure('PUBLIC_PARENT_UNVERIFIED', 'Conflicting public parent metadata');
+      const parent = publicParent(row);
+      if (parent.reason) throw failure('PUBLIC_PARENT_UNVERIFIED', parent.reason);
       if (current === target && request.runtimeRef && spawn?.agent_path && spawn.agent_path !== request.runtimeRef) throw failure('PUBLIC_PARENT_UNVERIFIED', 'Recorded runtime path does not match public metadata');
-      current = row.parentThreadId;
+      current = parent.parentId;
     }
     const params = { threadId: target, limit: 1, sortDirection: 'desc', itemsView: 'full' };
     if (request.cursor) params.cursor = request.cursor;

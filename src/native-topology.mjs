@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isThreadId } from './history-sync.mjs';
-import { probePublicSocket } from './native-public-reader.mjs';
+import { probePublicSocket, publicParent } from './native-public-reader.mjs';
 // Keep helper source with the live MCP connection, just like the self-contained UI.
 // A native plugin update may prune old cache files before that connection reloads.
 let metadataScript = null;
@@ -81,18 +81,18 @@ export function readBoundPublicAsync(request, { signal } = {}) {
 }
 
 export function topologyPlan(rootId, members, metadata) {
-  const rows = new Map(metadata.filter(row => isThreadId(row.id)).map(row => [row.id, row]));
+  const scopedIds = new Set(members.filter(m => !m.historyOnly && isThreadId(m.nativeId)).map(m => m.nativeId));
+  const rows = new Map(metadata.filter(row => scopedIds.has(row.id)).map(row => [row.id, row]));
   const plans = [];
   for (const member of members.filter(m => !m.historyOnly && m.nativeId !== rootId && isThreadId(m.nativeId))) {
     let id = member.nativeId, visited = new Set(), parentId = null, reason = null;
     while (id !== rootId) {
       if (visited.has(id) || visited.size >= 100) { reason = 'cyclic-or-too-deep'; break; }
       visited.add(id);
-      const row = rows.get(id), declared = row?.source?.subAgent?.thread_spawn?.parent_thread_id;
-      if (!row || !isThreadId(row.parentThreadId)) { reason = 'parent-metadata-unavailable'; break; }
-      if (declared && declared !== row.parentThreadId) { reason = 'conflicting-parent-metadata'; break; }
-      if (id === member.nativeId) parentId = row.parentThreadId;
-      id = row.parentThreadId;
+      const parent = publicParent(rows.get(id));
+      if (parent.reason) { reason = parent.reason; break; }
+      if (id === member.nativeId) parentId = parent.parentId;
+      id = parent.parentId;
     }
     if (reason || id !== rootId) { plans.push({ memberId: member.id, verified: false, reason: reason ?? 'outside-bound-root' }); continue; }
     const parent = parentId === rootId ? members.find(m => m.id === 'lead') : members.find(m => !m.historyOnly && m.nativeId === parentId);

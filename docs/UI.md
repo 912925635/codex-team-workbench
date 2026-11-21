@@ -1,4 +1,4 @@
-# UI and canvas (0.5.6)
+# UI and canvas (0.5.7)
 
 The interface is implemented in the existing plain JavaScript and CSS. It adds no
 React runtime, package dependency or external resource request.
@@ -26,8 +26,8 @@ these effects. Long references remain available in tooltips and node details.
 
 ## Update and cache behavior
 
-This release names the UI resource `ui://team-workbench/panel/0.5.6` and declares
-`TEAM_WORKBENCH_UI_REVISION=0.5.6` in the plugin's MCP definitions. Older UI resource
+This release names the UI resource `ui://team-workbench/panel/0.5.7` and declares
+`TEAM_WORKBENCH_UI_REVISION=0.5.7` in the plugin's MCP definitions. Older UI resource
 aliases remain supported. The MCP process keeps its startup UI to survive cache
 pruning, so an existing connection can retain an old interface after files change.
 A normal host plugin refresh must reload its component definitions and MCP

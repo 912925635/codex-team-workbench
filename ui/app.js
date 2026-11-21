@@ -2,6 +2,7 @@
   const $ = id => document.getElementById(id);
   const bridge = new WorkbenchBridge();
   const state = { boards: [], archivedBoards: [], board: null, owner: 'all', status: 'all', busy: false, refreshing: false, activeTask: null, detailRunId: null };
+  let launchBoardId = null, userSelectedBoard = false, selectionRevision = 0;
   const statusNames = { pending: '待领取', in_progress: '进行中', completed: '已完成', blocked: '等待依赖' };
   const runNames = { requested: '等待主代理接单', dispatched: '已登记真实启动回执', running: '执行中（代理上报）', reported: '结果已回传，待主代理核验', succeeded: '主代理已核验完成', failed: '执行失败' };
   const memberStates = { unknown: '状态未知', working: '上报：工作中', idle: '上报：空闲', completed: '上报：已完成', blocked: '上报：受阻', start_observed: '最近观察：开始', stop_observed: '最近观察：停止', end_observed: '最近观察：会话结束', interrupt_observed: '最近观察：中断', session_observed: '最近观察：会话打开' };
@@ -16,6 +17,7 @@
   function showError(error) { $('error').hidden = false; $('error').textContent = error.message; }
   function clearError() { $('error').hidden = true; }
   function apply(result) {
+    if (result.board && state.board?.id === result.board.id && state.board.revision > result.board.revision) return;
     if(result.nativeAutoHistory)state.nativeAutoHistory=result.nativeAutoHistory;
     if (result.nativeEvents) {
       state.nativeEvents = result.nativeEvents;
@@ -33,8 +35,15 @@
   }
   async function call(name, args) {
     clearError();
+    const selecting = ['team_panel', 'team_create_board', 'team_archive_board'].includes(name);
+    if (selecting) { userSelectedBoard = true; launchBoardId = null; selectionRevision++; }
+    const selection = selectionRevision;
     const result = await bridge.call(name, args);
-    apply(result); return result;
+    if (selection === selectionRevision) {
+      if (selecting) selectionRevision++;
+      apply(result);
+    }
+    return result;
   }
   const savedFingerprint = () => JSON.stringify({boards:state.boards,archivedBoards:state.archivedBoards,board:state.board},(key,value)=>['stale','runtimeFresh'].includes(key)?undefined:value);
   async function refresh({manual=false}={}) {
@@ -44,15 +53,32 @@
     if(manual)$('refresh-status').textContent='正在刷新已保存数据…';
     const before=savedFingerprint();
     try {
-      await call('team_snapshot', state.board ? {boardId:state.board.id}:{});
+      const boardId = launchBoardId ?? state.board?.id;
+      await call('team_snapshot', boardId ? {boardId} : {});
       const node=$('node-detail').open ? await browser.load(false) : null;
       if(node?.error)throw node.error;
       if(manual)$('refresh-status').textContent=`${before!==savedFingerprint() || node?.changed ? '已刷新 · 数据已更新' : '已刷新 · 数据未变化'} · ${new Date().toLocaleTimeString('zh-CN',{hour12:false})}`;
     } catch(e) { showError(e); if(manual)$('refresh-status').textContent=`刷新失败：${e.message}`; }
     finally {state.refreshing=false; $('refresh').disabled=false;}
   }
+  function restoreLaunchBoard(boardId) {
+    if (userSelectedBoard || typeof boardId !== 'string' || !boardId || launchBoardId === boardId) return;
+    launchBoardId = boardId;
+    const selection = ++selectionRevision;
+    if (bridge.ready && bridge.capabilities.serverTools) {
+      void call('team_snapshot', {boardId}).catch(error => { if (selection === selectionRevision) showError(error); });
+    }
+  }
+  bridge.onInput = args => restoreLaunchBoard(args?.boardId);
   bridge.onResult = result => {
-    if (!result.isError && result.structuredContent?.boards) apply(result.structuredContent);
+    const data = result?.structuredContent;
+    if (userSelectedBoard || result?.isError || !data?.boards) return;
+    if (launchBoardId && data.board?.id !== launchBoardId) return;
+    if (data.board) {
+      restoreLaunchBoard(data.board.id);
+      if (state.archivedBoards.some(b => b.id === data.board.id && b.revision >= data.board.revision)) return;
+    } else if (state.board) return;
+    apply(data);
   };
   let context = {};
   bridge.onContext = next => {
@@ -82,10 +108,10 @@
     const automatic=b.nativeHistorySync?.enabled && b.nativeHistorySync.rootThreadId===b.rootSessionId;
     const pending=!!b.syncInitialization?.requested;
     $('auto-history').textContent=`自动同步对话：${automatic?(state.nativeAutoHistory?.available?'开':'已启用·不可用'):pending?(b.rootSessionId?'待接入':'待关联'):'关'}`;
-    $('auto-history').disabled=!state.nativeAutoHistory?.available && !automatic && !pending;
+    $('auto-history').disabled=false;
     $('auto-history').setAttribute('aria-pressed', String(Boolean(automatic)));
     $('auto-history').setAttribute('data-sync-state', automatic ? (state.nativeAutoHistory?.available ? 'enabled' : 'unavailable') : pending ? 'pending' : 'disabled');
-    $('auto-history').title=!b.rootSessionId?'关联当前会话并启用自动同步；已登记的主代理身份会自动填入。':state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':state.nativeAutoHistory?.reason ?? '当前后端未提供自动同步条件的详细诊断。';
+    $('auto-history').title=!b.rootSessionId?'可先保存自动同步选择，取得当前主会话标识后完成关联。':state.nativeAutoHistory?.available?'启用后由插件后台按回合停止事件直接同步，无需主代理回读。':`可先保存选择，等待读取条件就绪。${state.nativeAutoHistory?.reason ?? ''}`;
     if(pending)$('notice').textContent=b.rootSessionId?'已保存自动同步选择，等待宿主同步条件就绪。':'已选择自动同步，等待主代理登记当前会话身份后自动关联并启用。';
     $('stat-total').textContent = b.tasks.length;
     $('stat-active').textContent = b.tasks.filter(t => t.status === 'in_progress').length;
@@ -256,7 +282,7 @@
     if(!b.rootSessionId || b.syncInitialization?.requested){
       const pending=!!b.syncInitialization?.requested;
       editor('关联并启用自动同步',form=>{
-        const field=inputField(form,'当前主会话 UUID','sessionId',{value:b.rootSessionId??b.members.find(m=>m.id==='lead')?.nativeId??'',maxLength:36,hint:'使用已登记的主代理身份，或填写从原聊天核实的准确标识。不会根据其他聊天自动猜测。'});
+        const field=inputField(form,'当前主会话 UUID（可选）','sessionId',{value:b.rootSessionId??b.members.find(m=>m.id==='lead')?.nativeId??'',maxLength:36,hint:'可填写从原聊天核实的标识，或留空保存选择，等待主会话身份登记。'});
         if(b.rootSessionId)field.readOnly=true;
         if(pending)inputField(form,'操作','action',{type:'select',options:[['enable','关联并启用'],['cancel','取消等待并关闭自动同步']]});
         form.append(el('p','muted','仅此工作台、此主会话下经公开父子关系核对的子代理；回合停止后保存一页可见文本，原有任务和记录保留。'));
@@ -265,8 +291,8 @@
         if(data.get('confirmed')!=='on')throw new Error('请先确认关联与同步范围。');
         if(pending && data.get('action')==='cancel')return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId??'',enabled:false,confirmed:true});
         const sessionId=String(data.get('sessionId')??'').trim();
-        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId))throw new Error('尚未取得准确会话标识。请由原主代理登记当前会话身份，或填写核实后的完整 UUID。');
-        if(b.rootSessionId)return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId,enabled:true,confirmed:true});
+        if(!sessionId || b.rootSessionId)return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId??'',enabled:true,confirmed:true});
+        if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId))throw new Error('请填写完整的 36 位会话 UUID，或留空等待主会话身份登记。');
         return call('team_bind_session',{boardId:b.id,sessionId,expectedRevision:b.revision,automaticHistory:true,confirmed:true,nativeIdSource:'user-supplied',evidence:'User confirmed this displayed originating UUID and this board scoped automatic visible-text sync in one initialization form'});
       });
       return;
@@ -275,6 +301,7 @@
     editor(enabled?'启用后台自动同步可见对话':'关闭后台自动同步可见对话',form=>{
       form.append(el('p','muted',`范围：仅此工作台当前主会话 ${b.rootSessionId} 下，经公开父子关系核对的子代理。`));
       form.append(el('p','muted',enabled?'回合停止后，后台直接保存一页用户/代理可见文本，按事件去重；不保存推理或工具正文，不向主对话发消息。现有 Hooks 的范围和信任设置不会改变。':'停止自动读取新页面，保留已保存记录。'));
+      if (enabled && !state.nativeAutoHistory?.available) form.append(el('p','muted','当前读取条件尚未就绪。保存选择后，工作台将显示待接入。'));
       confirmField(form,enabled?'确认对上述范围启用自动同步':'确认关闭自动同步并保留记录');
     },data=>{if(data.get('confirmed')!=='on')throw new Error('请先确认自动同步范围。');return call('team_set_history_sync',{boardId:b.id,expectedRevision:b.revision,expectedRootSessionId:b.rootSessionId,enabled,confirmed:true});});
   }
@@ -375,7 +402,7 @@
     try {
       await bridge.connect();
       $('connection').setAttribute('data-state', bridge.preview ? 'preview' : 'ready');
-      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.6 · 未连接宿主' : '插件协议已连接 · 0.5.6';
+      $('connection').textContent = bridge.preview ? '本地预览 · 0.5.7 · 未连接宿主' : '插件协议已连接 · 0.5.7';
       $('notice').textContent = bridge.preview
         ? '本地可用版本：任务会真实保存。原生代理尚未连接；成员状态显示记录来源。'
         : '点击团队节点查看会话绑定、已同步内容、实际状态来源及可用操作。工作流与层级以登记记录为准。';

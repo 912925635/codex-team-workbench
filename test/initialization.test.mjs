@@ -79,3 +79,35 @@ test('a root change cannot transfer pending automatic-sync consent to the new or
   const r=dispatch(s,'team_snapshot',{boardId:b.id});
   assert.equal(r.board.rootSessionId,child);assert.equal(r.nativeAutoHistory.enabled,false);assert.equal(r.board.syncInitialization.requested,false);
 });
+
+test('reopening a legacy board finishes confirmed setup from its already recorded lead UUID', t => {
+  const store = fixture(t);
+  const board = store.create('Existing board', {automaticHistory:true, confirmed:true});
+  store.transact(board.id, current => {
+    Object.assign(current.members[0], {nativeId:root, nativeIdentity:{source:'public-thread-read', evidence:'Previously recorded lead UUID'}});
+  });
+  const result = dispatch(store, 'team_panel', {boardId:board.id});
+  assert.equal(result.board.rootSessionId, root);
+  assert.equal(result.nativeAutoHistory.enabled, true);
+  assert.equal(dispatch(store, 'team_snapshot', {boardId:board.id}).board.revision, result.board.revision);
+});
+
+test('opening a pending board cannot promote an unsourced UUID or a child to lead', t => {
+  const store = fixture(t);
+  const board = store.create('Pending board', {automaticHistory:true, confirmed:true});
+  store.transact(board.id, current => {
+    current.members[0].nativeId = root;
+    current.members.push({id:'child', parentId:'lead', nativeId:child, nativeIdentity:{source:'host-env'}});
+  });
+  const result = dispatch(store, 'team_panel', {boardId:board.id});
+  assert.equal(result.board.rootSessionId, null);
+  assert.equal(result.nativeAutoHistory.enabled, false);
+});
+
+test('first explicit binding immediately honors a previously confirmed pending choice', t => {
+  const store = fixture(t);
+  const board = store.create('Pending board', {automaticHistory:true, confirmed:true});
+  const result = dispatch(store, 'team_bind_session', {boardId:board.id, sessionId:root, expectedRevision:board.revision});
+  assert.equal(result.nativeAutoHistory.enabled, true);
+  assert.equal(result.board.syncInitialization.requested, false);
+});

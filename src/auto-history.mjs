@@ -27,15 +27,25 @@ export function autoHistoryStatus(store,board) {
 }
 export function configureAutoHistory(store,input) {
   requireValue(input.confirmed===true,'CONFIRMATION_REQUIRED','Confirm this workbench scoped visible-text collection before changing automatic sync');
-  if(input.enabled){const status=autoHistoryStatus(store);requireValue(status.available,'PUBLIC_HISTORY_UNAVAILABLE',status.reason);}
   const board=store.transact(input.boardId,b=>{
     requireValue(!b.archivedAt && b.revision===input.expectedRevision,'STALE_REVISION','Refresh the current active board before changing automatic sync');
-    if (!b.rootSessionId && !input.enabled && input.expectedRootSessionId === '' && b.syncInitialization?.requested) {
+    const unbound = !b.rootSessionId && input.expectedRootSessionId === '';
+    if (unbound && !input.enabled && b.syncInitialization?.requested) {
       b.syncInitialization = {...b.syncInitialization, requested:false, state:'cancelled', updatedAt:new Date().toISOString()};
       store.event(b,'automatic_history_setting','Cancelled pending initialization; no history was collected');
       return;
     }
-    requireValue(isThreadId(b.rootSessionId) && b.rootSessionId===input.expectedRootSessionId,'THREAD_BINDING_REQUIRED','Confirm this exact bound root UUID');
+    const rootMatches = isThreadId(b.rootSessionId) && b.rootSessionId === input.expectedRootSessionId;
+    requireValue(rootMatches || (unbound && input.enabled),'THREAD_BINDING_REQUIRED','Confirm this exact bound root UUID');
+    if (input.enabled && (unbound || !autoHistoryStatus(store).available)) {
+      if (enabled(b)) return false;
+      const state = unbound ? 'waiting-for-identity' : 'waiting-for-reader';
+      if (b.syncInitialization?.requested && b.syncInitialization.confirmed && b.syncInitialization.state === state) return false;
+      b.syncInitialization = {requested:true, confirmed:true, requestedAt:new Date().toISOString(), state,
+        ...(rootMatches ? {rootThreadId:b.rootSessionId} : {}), coverage:'one-latest-turn-visible-text-on-native-stop'};
+      store.event(b,'automatic_history_setting',unbound ? 'Requested automatic history when the board root is identified' : 'Requested automatic history when the reader is available for this root');
+      return;
+    }
     b.nativeHistorySync={enabled:input.enabled,rootThreadId:b.rootSessionId,generation:(b.nativeHistorySync?.generation??0)+1,
       updatedAt:new Date().toISOString(),coverage:'one-latest-turn-visible-text-on-native-stop'};
     if (b.syncInitialization) b.syncInitialization = {...b.syncInitialization, requested:false,

@@ -13,6 +13,17 @@ test('verified metadata builds direct child and grandchild from exact IDs, never
  assert.equal(plans.find(p=>p.memberId==='a').parentId,'lead');assert.equal(plans.find(p=>p.memberId==='b').parentId,'a');
  assert(topologyPlan(root,members,[{id:a,sessionId:root}]).every(p=>!p.verified));
 });
+test('each recorded edge can use a single exact public parent source',()=>{
+ const direct={id:a,parentThreadId:root},spawn=row(b,a,'/root/a/b');
+ for(const value of [null,undefined]){
+   spawn.parentThreadId=value;
+   const plans=topologyPlan(root,members,[direct,spawn]);
+   assert.deepEqual(plans.map(p=>[p.memberId,p.verified,p.parentId]),[['a',true,'lead'],['b',true,'a']]);
+ }
+ const outside='00000000-0000-4000-8000-000000000304';
+ const viaOutside=[row(b,a,'/root/a/b'),row(a,outside,'/root/a'),row(outside,root,'/root/other')];
+ assert(topologyPlan(root,members,viaOutside).every(p=>!p.verified));
+});
 test('missing, contradictory, cyclic, historical and runtime-conflicting metadata never changes parentage',()=>{
  assert(topologyPlan(root,members,[row(a,b,'/root/a'),row(b,a,'/root/a/b')]).every(p=>!p.verified));
  const bad=row(a,root,'/root/a');bad.source.subAgent.thread_spawn.parent_thread_id=b;

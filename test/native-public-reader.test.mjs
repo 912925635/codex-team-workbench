@@ -5,7 +5,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, rmdirSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep, dirname } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { promisify } from 'node:util';
 import { Worker } from 'node:worker_threads';
 import { readPublicRequest, controlSocketPath, probePublicSocket } from '../src/native-public-reader.mjs';
 import { nativeReadPlatformSupported, publicReaderStatus, readBoundPublic, readBoundPublicAsync } from '../src/native-topology.mjs';
@@ -59,7 +61,7 @@ async function fixture(t,options={}){
         if(options.frameFlood){socket.write(Buffer.concat(Array.from({length:4097},(_,i)=>frame(Buffer.alloc(0),i?0:1,false))));continue;}
         if(options.handle){options.handle(msg,{send,socket});continue;}
         if(msg.method==='initialize')send({id:msg.id,result:{}});
-        else if(msg.method==='thread/read')send({id:msg.id,result:{thread:{...rows.find(r=>r.id===msg.params.threadId),turns:[{text:'UNREQUESTED_METADATA_BODY_FIXTURE'}]}}});
+        else if(msg.method==='thread/read')send({id:msg.id,result:{thread:{...(options.rows??rows).find(r=>r.id===msg.params.threadId),turns:[{text:'UNREQUESTED_METADATA_BODY_FIXTURE'}]}}});
         else if(msg.method==='thread/turns/list')send({id:msg.id,result:options.history??history});
         else assert.fail('Unexpected RPC '+msg.method);
       }
@@ -111,6 +113,66 @@ test('Node local WebSocket reader uses exact read-only RPCs and omits hidden/too
 
 test('fragmented WebSocket text and interleaved ping frames preserve the bounded result',async t=>{
   const f=await fixture(t,{fragment:true});const page=await f.read();assert.equal(page.turns[0].items[1].text,'Visible fixture result');assert(f.pongs()>0);
+});
+
+test('public history verifies mixed parent sources before reading only the requested descendant',async t=>{
+  const parent='00000000-0000-4000-8000-000000000983';
+  const nested={parent_thread_id:parent,agent_path:input.runtimeRef};
+  const metadata=[{id:root},{id:parent,parentThreadId:root},{id:child,parentThreadId:null,source:{subAgent:{thread_spawn:nested}}}];
+  const f=await fixture(t,{rows:metadata});
+  const request={...input,threadIds:[child,parent,root]};
+  assert.equal((await f.read(request)).threadId,child);
+  delete metadata[2].parentThreadId;
+  assert.equal((await f.read(request)).threadId,child);
+  await assert.rejects(f.read(input),{code:'PUBLIC_PARENT_UNVERIFIED'});
+  nested.parent_thread_id='invalid';
+  await assert.rejects(f.read(request),{code:'PUBLIC_PARENT_UNVERIFIED'});
+  assert.deepEqual(f.calls.filter(c=>c.method==='thread/turns/list').map(c=>c.params.threadId),[child,child]);
+});
+
+test('Windows packaged PowerShell reader accepts spawn-only parents and rejects conflicts before history', {skip:process.platform!=='win32'}, async t=>{
+  const metadata=structuredClone(rows);metadata[1].parentThreadId=null;
+  const f=await fixture(t,{rows:metadata});
+  // Node's Windows test server uses a named pipe. Bridge its bytes to the AF_UNIX
+  // socket expected by the unmodified packaged helper, under an isolated home.
+  const home=mkdtempSync(join(tmpdir(),'tw-w-')),socketPath=join(home,'app-server-control','app-server-control.sock');
+  mkdirSync(dirname(socketPath));
+  const bridge=spawn('pwsh',['-NoProfile','-NonInteractive','-Command',`
+    $ErrorActionPreference='Stop'
+    $listener=[Net.Sockets.Socket]::new('Unix','Stream','Unspecified')
+    $listener.Bind([Net.Sockets.UnixDomainSocketEndPoint]::new($env:FIXTURE_SOCKET))
+    $listener.Listen(1)
+    [Console]::WriteLine('ready')
+    while ($true) {
+      $stream=[Net.Sockets.NetworkStream]::new($listener.Accept(),$true)
+      $pipe=[IO.Pipes.NamedPipeClientStream]::new('.',$env:FIXTURE_PIPE,'InOut','Asynchronous')
+      try {
+        $pipe.Connect(5000)
+        $outgoing=$stream.CopyToAsync($pipe)
+        $incoming=$pipe.CopyToAsync($stream)
+        [void][Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]@($outgoing,$incoming))
+      } finally { $stream.Dispose(); $pipe.Dispose() }
+    }`],{windowsHide:true,env:{...process.env,FIXTURE_SOCKET:socketPath,FIXTURE_PIPE:f.path.split('\\').at(-1)}});
+  const closed=once(bridge,'close');
+  const ready=once(bridge.stdout,'data');
+  try {
+    const started=await Promise.race([ready,closed]);
+    assert.equal(String(started[0]).trim(),'ready');
+    const read=async(request)=>{
+      const helper=promisify(execFile)('pwsh',['-NoProfile','-NonInteractive','-File',resolve(import.meta.dirname,'../src/read-native-metadata.ps1')],
+        {windowsHide:true,timeout:20000,env:{...process.env,CODEX_HOME:home}});
+      helper.child.stdin.end(JSON.stringify(request));
+      return JSON.parse((await helper).stdout);
+    };
+    assert.equal((await read(input)).threadId,child);
+    await assert.rejects(read({...input,runtimeRef:'/root/wrong'}),error=>JSON.parse(error.stdout).message==='Runtime path mismatch');
+    metadata[1].parentThreadId='00000000-0000-4000-8000-000000000983';
+    await assert.rejects(read(input),error=>JSON.parse(error.stdout).message==='Conflicting parent metadata');
+    assert.equal(f.calls.filter(c=>c.method==='thread/turns/list').length,1);
+  } finally {
+    bridge.kill();await closed;
+    assert(resolve(home).startsWith(resolve(tmpdir())+sep));rmSync(home,{recursive:true,force:true});
+  }
 });
 
 test('wrong parent, runtime path or identity fails before requesting any history body',async t=>{
@@ -195,8 +257,8 @@ test('automatic-sync diagnostics distinguish an unavailable endpoint and preserv
   f.cleanupFirst(()=>store.close());let b=store.create('Synthetic diagnostics');b=store.bind(b.id,root,b.revision);
   const configure=enabled=>dispatch(store,'team_set_history_sync',{boardId:b.id,expectedRevision:store.read(b.id).revision,expectedRootSessionId:root,enabled,confirmed:true});
   let status=autoHistoryStatus(store,store.read(b.id));assert.equal(status.available,false);assert.equal(status.publicHistory.code,'PUBLIC_SOCKET_MISSING');assert.equal(status.hookJournal.configured,true);
-  assert.throws(()=>configure(true),error=>error.code==='PUBLIC_HISTORY_UNAVAILABLE'&&error.message==='Fixture socket missing');
-  available=true;configure(true);available=false;
+  const pending=configure(true);assert.equal(pending.board.syncInitialization.state,'waiting-for-reader');assert.equal(pending.nativeAutoHistory.enabled,false);
+  available=true;dispatch(store,'team_snapshot',{boardId:b.id});available=false;
   status=autoHistoryStatus(store,store.read(b.id));assert.equal(status.enabled,true);assert.equal(status.available,false);assert.equal(status.reason,'Fixture socket missing');assert.equal(calls,0);
   configure(false);assert.equal(autoHistoryStatus(store,store.read(b.id)).enabled,false);
 });

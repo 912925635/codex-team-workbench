@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.7 — session binding and automatic history
+
+- Restore the workbench identified by the opened card and ignore late responses that would replace a more recent selection.
+- Persist confirmed synchronization requests while the lead identity or history reader is unavailable. Resume setup when the missing information becomes available.
+- Verify native parent chains using either the direct parent UUID or the UUID in the public spawn metadata. Conflicting identities still block the read.
+
 ## 0.5.6 — interactive canvas and task console
 
 - Add canvas zoom, fit, 100% reset and background drag panning. Keep pan and zoom

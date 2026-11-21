@@ -1,4 +1,4 @@
-# Linux server synchronization (0.5.6)
+# Linux server synchronization
 
 ## Adapter gap in 0.5.3
 

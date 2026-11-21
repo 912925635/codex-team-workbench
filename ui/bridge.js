@@ -4,7 +4,7 @@ class WorkbenchBridge {
   constructor() {
     this.preview = document.documentElement.dataset.preview === 'true';
     this.pending = new Map(); this.nextId = 1; this.capabilities = {}; this.ready = false;
-    this.onResult = () => {}; this.onContext = () => {};
+    this.onInput = () => {}; this.onResult = () => {}; this.onContext = () => {};
     this.listener = event => {
       if (event.source !== window.parent || window.parent === window) return;
       const data = event.data;
@@ -14,7 +14,8 @@ class WorkbenchBridge {
         this.pending.delete(data.id); clearTimeout(pending.timer);
         if(data.error){const error=new Error(`${data.error.message ?? 'Host request failed'}${data.error.code!==undefined?` (RPC ${data.error.code})`:''}`);error.code=data.error.code;pending.reject(error);}
         else pending.resolve(data.result);
-      } else if (data.method === 'ui/notifications/tool-result') this.onResult(data.params);
+      } else if (data.method === 'ui/notifications/tool-input') this.onInput(data.params?.arguments);
+      else if (data.method === 'ui/notifications/tool-result') this.onResult(data.params);
       else if (data.method === 'ui/notifications/host-context-changed') this.onContext(data.params);
       else if (data.method === 'ui/resource-teardown' && Object.hasOwn(data, 'id')) {
         this.ready = false;
@@ -36,7 +37,7 @@ class WorkbenchBridge {
     if (this.preview) { this.ready = true; return; }
     if (window.parent === window) throw new Error('请在插件面板中打开；本地预览请使用 npm run preview');
     const result = await this.request('ui/initialize', {
-      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.5.6' },
+      protocolVersion: '2026-01-26', appInfo: { name: 'team-workbench', version: '0.5.7' },
       appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] }
     });
     this.capabilities = result.hostCapabilities ?? {};

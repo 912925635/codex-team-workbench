@@ -43,7 +43,7 @@ for (const groups of Object.values(hooks)) for (const group of groups) for (cons
   assert.equal(handler.command, 'node \"${PLUGIN_ROOT}/src/native-hook.mjs\"');
 }
 const skill = readFileSync(join(root, 'skills/team-workbench/SKILL.md'), 'utf8');
-assert(skill.startsWith('---\nname: team-workbench\ndescription:'));
+assert(/^---\r?\nname: team-workbench\r?\ndescription:/.test(skill));
 for (const file of files) {
   if (!/\.(md|json|mjs|js|html|css|svg)$/.test(file)) continue;
   const content = readFileSync(file, 'utf8');

@@ -13,7 +13,8 @@ function fixture(t, { missingUi = false, automaticHistory = false } = {}) {
   for (const name of ['src', 'ui']) cpSync(join(root, name), join(dir, name), { recursive: true });
   if (missingUi) rmSync(join(dir, 'ui'), { recursive: true });
   const child = spawn(process.execPath, [join(dir, 'src/server.mjs')], {
-    cwd: dir, env: { ...process.env, CODEX_HOME: join(dir, 'isolated-codex-home'), TEAM_WORKBENCH_DATA: join(dir, 'isolated-data'),...(automaticHistory?{PLUGIN_DATA:join(dir,'isolated-plugin-data')}:{}) },
+    cwd: dir, env: { ...process.env, CODEX_HOME: join(dir, 'isolated-codex-home'), TEAM_WORKBENCH_DATA: join(dir, 'isolated-data'),
+      TEAM_WORKBENCH_NATIVE_EVENTS:'', PLUGIN_DATA:automaticHistory ? join(dir,'isolated-plugin-data') : '' },
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map(); let next = 0, stderr = '';
   child.stderr.on('data', d => { stderr += d; });
@@ -47,7 +48,7 @@ test('inline history cards preserve fullscreen support and the manual thread ent
   const tool = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
   assert.deepEqual(tool._meta['openai/ui'].entrypoints, [{ type: 'thread' }]);
   const uris = [tool._meta.ui.resourceUri, 'ui://team-workbench/panel',
-    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', 'ui://team-workbench/panel/0.5.4', 'ui://team-workbench/panel/0.5.5', tool._meta.ui.resourceUri];
+    'ui://team-workbench/panel/0.5.1', 'ui://team-workbench/panel/0.5.2', 'ui://team-workbench/panel/0.5.3', 'ui://team-workbench/panel/0.5.4', 'ui://team-workbench/panel/0.5.5', 'ui://team-workbench/panel/0.5.6'];
   for (const uri of uris) {
     const response = await c.request('resources/read', { uri });
     assert.equal(response.error, undefined);
@@ -73,7 +74,7 @@ test('a running MCP connection retains its complete UI after an upgrade prunes i
   const before = (await resource(c)).result.contents[0];
   assert(before.text.includes('请求主会话关联并同步'));
   assert(!before.text.includes('/* APP_JS */'));
-  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3','0.5.4','0.5.5']){
+  for(const version of ['0.4.2','0.5.1','0.5.2','0.5.3','0.5.4','0.5.5','0.5.6']){
     const oldUri=`ui://team-workbench/panel/${version}`;
     const alias=await c.request('resources/read',{uri:oldUri});
     assert.equal(alias.result.contents[0].uri,oldUri);assert.equal(alias.result.contents[0].text,before.text);
@@ -109,28 +110,87 @@ class Element {
   showModal() { this.open = true; }
 }
 
-test('the actual resources/read HTML boots through ui/initialize and tools/call with all bundled scripts', async t => {
-  const c = fixture(t,{automaticHistory:true}); await initialize(c);
-  const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
-  const uri = discovery._meta.ui.resourceUri;
-  assert.equal(uri, 'ui://team-workbench/panel/0.5.6');
-  const legacy = await resource(c);
-  assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
-  const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' } })).result.structuredContent.board;
-  await c.request('tools/call', { name: 'team_create_task', arguments: { boardId: board.id, title: 'Resource fixture task' } });
-  const html = (await c.request('resources/read', { uri })).result.contents[0].text;
+function mountPanel(html, respond) {
   const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m => m[1]);
   assert.equal(scripts.length, 1);
   const ids = Object.fromEntries([...html.matchAll(/\bid="([^"]+)"/g)].map(m => [m[1], new Element()]));
   ids['editor-form'].append(ids['editor-fields']);
   const document = { hidden: false, documentElement: { dataset: { preview: 'false' }, style: { setProperty() {} } },
     getElementById: id => ids[id], createElement: tag => new Element(tag) };
-  let listener, settle, reject, holdSnapshot=false, releaseSnapshot, failSnapshot=false;
+  let listener;
+  const window = { addEventListener(type, fn) { if (type === 'message') listener = fn; } };
+  const deliver = data => listener({source:window.parent, data:{jsonrpc:'2.0', ...data}});
+  window.parent = {postMessage(message) { if (message.id) respond(message, result => deliver({id:message.id, result})); }};
+  const context = { document, window, Option: class extends Element { constructor(text, value) { super('option', text); this.value = value; } },
+    setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, console, FormData: class {
+      constructor(form) {const all=n=>[n,...n.children.flatMap(all)];this.values=new Map(all(form).filter(n=>n.name && (n.type!=='checkbox'||n.checked)).map(n=>[n.name,n.type==='checkbox'?'on':n.value]));}
+      get(name) {return this.values.get(name) ?? null;}
+      getAll(name) {return this.values.has(name)?[this.values.get(name)]:[];}
+    } };
+  vm.runInNewContext(scripts[0], context, { filename: 'actual-mcp-resource.js', timeout: 1000 });
+  return {ids, notify: (method, params) => deliver({method, params})};
+}
+
+test('a reopened card restores its explicit board and late replies cannot undo a local selection', async t => {
+  const c = fixture(t); await initialize(c);
+  const tool = async (name, args) => (await c.request('tools/call', {name, arguments:args})).result;
+  const first = (await tool('team_create_board', {title:'Original card board', sessionId:'00000000-0000-4000-8000-000000009002'})).structuredContent.board;
+  const second = (await tool('team_create_board', {title:'Explicit selection'})).structuredContent.board;
+  const empty = await tool('team_snapshot', {});
+  assert.equal(empty.structuredContent.board, null);
+  const opened = await tool('team_panel', {boardId:first.id});
+  await tool('team_set_history_sync', {boardId:first.id, expectedRevision:first.revision, expectedRootSessionId:first.rootSessionId,
+    enabled:true, confirmed:true});
+  const exact = await tool('team_snapshot', {boardId:first.id});
+  assert.equal(exact.structuredContent.nativeAutoHistory.available, false);
+  assert.equal(exact.structuredContent.board.syncInitialization.state, 'waiting-for-reader');
+  const chosen = await tool('team_panel', {boardId:second.id});
+  const html = (await resource(c)).result.contents[0].text;
+  const delivered = () => new Promise(resolve => setImmediate(resolve));
+  for (const notice of ['tool-input', 'tool-result']) {
+    const pending = [];
+    const {ids, notify} = mountPanel(html, (message, reply) => {
+      if (message.method === 'ui/initialize') return reply({hostCapabilities:{serverTools:{}}});
+      pending.push({name:message.params.name, boardId:message.params.arguments.boardId, reply});
+    });
+    await delivered();
+    assert.equal(pending[0].boardId, undefined);
+    notify(`ui/notifications/${notice}`, notice === 'tool-input' ? {arguments:{boardId:first.id}} : opened);
+    assert.equal(pending[1].name, 'team_snapshot');
+    assert.equal(pending[1].boardId, first.id);
+    pending[1].reply(exact); await delivered();
+    pending[0].reply(empty); await delivered();
+    assert.equal(ids['board-select'].value, first.id);
+    notify('ui/notifications/tool-result', opened);
+    assert.equal(ids['auto-history'].textContent,'自动同步对话：待接入');
+    const oldRefresh = ids['refresh'].onclick();
+    const selection = ids['board-select'].onchange({target:{value:second.id}});
+    assert.equal(pending[2].boardId, first.id);
+    assert.equal(pending[3].boardId, second.id);
+    pending[3].reply(chosen); await selection;
+    pending[2].reply(exact); await oldRefresh;
+    notify('ui/notifications/tool-result', opened);
+    notify('ui/notifications/tool-input', {arguments:{boardId:first.id}});
+    assert.equal(ids['board-select'].value, second.id);
+    assert.equal(pending.length, 4);
+  }
+});
+
+test('the actual resources/read HTML boots through ui/initialize and tools/call with all bundled scripts', async t => {
+  const c = fixture(t,{automaticHistory:true}); await initialize(c);
+  const discovery = (await c.request('tools/list')).result.tools.find(tool => tool.name === 'team_panel');
+  const uri = discovery._meta.ui.resourceUri;
+  assert.equal(uri, 'ui://team-workbench/panel/0.5.7');
+  const legacy = await resource(c);
+  assert.equal(legacy.result.contents[0].uri, 'ui://team-workbench/panel');
+  const session = {'openai/session':'fixture-anonymous-panel-session'};
+  const board = (await c.request('tools/call', { name: 'team_create_board', arguments: { title: 'Full resource fixture' }, _meta:session })).result.structuredContent.board;
+  await c.request('tools/call', { name: 'team_create_task', arguments: { boardId: board.id, title: 'Resource fixture task' } });
+  const html = (await c.request('resources/read', { uri })).result.contents[0].text;
+  let settle, reject, holdSnapshot=false, releaseSnapshot, failSnapshot=false;
   const completed = new Promise((yes, no) => { settle = yes; reject = no; });
   const methods = [];
-  const window = { addEventListener(type, fn) { if (type === 'message') listener = fn; } };
-  window.parent = { postMessage(message) {
-    if (!message.id) return;
+  const {ids} = mountPanel(html, (message, reply) => {
     methods.push(message.method);
     (async () => {
       const isSnapshot=message.method==='tools/call' && message.params.name==='team_snapshot';
@@ -139,18 +199,11 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
         : message.method === 'ui/initialize'
         ? { hostCapabilities: { serverTools: {}, message:{text:{}}, experimental:{'openai/message':{}} }, hostContext: {}, hostInfo: { name: 'Deterministic fixture' } }
         : message.method==='ui/message' ? {}
-        : (await c.request(message.method, { ...message.params, arguments: { ...message.params.arguments, ...(['team_snapshot','team_panel'].includes(message.params.name)?{boardId:message.params.arguments.boardId ?? board.id}:{}) } })).result;
-      listener({ source: window.parent, data: { jsonrpc: '2.0', id: message.id, result } });
+        : (await c.request(message.method, {...message.params, _meta:session})).result;
+      reply(result);
       if (message.method === 'tools/call') setImmediate(settle);
     })().catch(reject);
-  }};
-  const context = { document, window, Option: class extends Element { constructor(text, value) { super('option', text); this.value = value; } },
-    setTimeout, clearTimeout, setInterval: () => 1, clearInterval() {}, console, FormData: class {
-      constructor(form) {const all=n=>[n,...n.children.flatMap(all)];this.values=new Map(all(form).filter(n=>n.name && (n.type!=='checkbox'||n.checked)).map(n=>[n.name,n.type==='checkbox'?'on':n.value]));}
-      get(name) {return this.values.get(name) ?? null;}
-      getAll(name) {return this.values.has(name)?[this.values.get(name)]:[];}
-    } };
-  vm.runInNewContext(scripts[0], context, { filename: 'actual-mcp-resource.js', timeout: 1000 });
+  });
   await completed;
   assert.deepEqual(methods, ['ui/initialize', 'tools/call']);
   assert.equal(ids['board-title'].textContent, 'Full resource fixture');
@@ -215,14 +268,15 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   walk(ids['editor-fields']).find(n=>n.name==='confirmed').checked=true;
   await ids['editor-form'].onsubmit({preventDefault(){}});
   assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.rootSessionId,field.value);
-  if(process.platform==='win32'){
-    assert.equal(ids['auto-history'].disabled,false);ids['auto-history'].onclick();
-    await submit();assert.equal(ids['editor'].open,true);assert(ids['form-error'].textContent.includes('确认'));
-    assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.nativeHistorySync,undefined);
-    fieldByName('confirmed').checked=true;await submit();assert(ids['auto-history'].textContent.includes('开'));
-    ids['auto-history'].onclick();fieldByName('confirmed').checked=true;await submit();assert(ids['auto-history'].textContent.includes('关'));
-    assert.equal(methods.filter(m=>m==='ui/message').length,1,'Automatic-sync configuration uses MCP and requires no main-chat request');
-  }else assert.equal(ids['auto-history'].disabled,true);
+  const readerAvailable = (await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.nativeAutoHistory.available;
+  assert.equal(ids['auto-history'].disabled,false);ids['auto-history'].onclick();
+  await submit();assert.equal(ids['editor'].open,true);assert(ids['form-error'].textContent.includes('确认'));
+  assert.equal((await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:board.id}})).result.structuredContent.board.nativeHistorySync,undefined);
+  fieldByName('confirmed').checked=true;await submit();
+  assert.equal(ids['auto-history'].textContent, readerAvailable?'自动同步对话：开':'自动同步对话：待接入');
+  ids['auto-history'].onclick();if (!readerAvailable) fieldByName('action').value='cancel';
+  fieldByName('confirmed').checked=true;await submit();assert(ids['auto-history'].textContent.includes('关'));
+  assert.equal(methods.filter(m=>m==='ui/message').length,1,'Automatic-sync configuration uses MCP and requires no main-chat request');
   ids['archive-board'].onclick();
   assert(ids['editor-fields'].textContent.includes('不会删除项目文件'));
   walk(ids['editor-fields']).find(n=>n.name==='confirmed').checked=true;
@@ -240,5 +294,8 @@ test('the actual resources/read HTML boots through ui/initialize and tools/call 
   assert.equal(ids['auto-history'].textContent,'自动同步对话：关');
   const created=(await c.request('tools/call',{name:'team_snapshot',arguments:{boardId:ids['board-select'].value}})).result.structuredContent.board;
   assert.equal(created.rootSessionId,null);assert.equal(created.syncInitialization.requested,false);
+  ids['auto-history'].onclick();fieldByName('confirmed').checked=true;await submit();
+  assert.equal(ids['auto-history'].textContent,'自动同步对话：待关联');
+  await ids['refresh'].onclick();assert.equal(ids['auto-history'].textContent,'自动同步对话：待关联');
   assert.equal(methods.filter(m=>m==='ui/message').length,1,'Creation and initialization never send an implicit main-chat message');
 });

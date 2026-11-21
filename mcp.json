@@ -9,7 +9,7 @@
       ],
       "cwd": "${PLUGIN_ROOT}",
       "env": {
-        "TEAM_WORKBENCH_UI_REVISION": "0.5.6"
+        "TEAM_WORKBENCH_UI_REVISION": "0.5.7"
       }
     }
   }

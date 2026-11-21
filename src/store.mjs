@@ -107,8 +107,16 @@ export class Store {
     return this.initializeHistory(board.id);
   }
   initializeHistory(id) {
-    const board = this.read(id), setup = board.syncInitialization;
-    if (!setup?.requested || setup.confirmed !== true || board.archivedAt || !isThreadId(board.rootSessionId)) return this.view(board);
+    let board = this.read(id);
+    if (!board.syncInitialization?.requested || board.syncInitialization.confirmed !== true || board.archivedAt) return this.view(board);
+    // Older boards can already have the explicitly identified lead without a root binding.
+    if (!board.rootSessionId && this.identifiedLead(board)) {
+      board = this.transact(id, current => {
+        if (current.archivedAt || current.rootSessionId || !current.syncInitialization?.requested ||
+            current.syncInitialization.confirmed !== true || !this.bindIdentifiedLead(current)) return false;
+      });
+    }
+    if (board.archivedAt || !board.syncInitialization?.requested || board.syncInitialization.confirmed !== true || !isThreadId(board.rootSessionId)) return this.view(board);
     if (!autoHistoryStatus(this, board).available) return this.view(board);
     try {
       return configureAutoHistory(this, { boardId: id, expectedRevision: board.revision,
@@ -117,6 +125,19 @@ export class Store {
       if (error.code === 'STALE_REVISION') return this.view(this.read(id));
       throw error;
     }
+  }
+  identifiedLead(board) {
+    const lead = board.members.find(member => member.id === 'lead' && !member.historyOnly);
+    return isThreadId(lead?.nativeId) && ['host-env', 'public-thread-read', 'user-supplied'].includes(lead.nativeIdentity?.source)
+      ? lead : null;
+  }
+  bindIdentifiedLead(board) {
+    const lead = this.identifiedLead(board);
+    if (!lead || board.archivedAt || board.rootSessionId) return false;
+    board.rootSessionId = lead.nativeId;
+    if (board.syncInitialization?.requested) board.syncInitialization.state = 'waiting-for-reader';
+    this.event(board, 'session_bound', 'Initial binding from the explicitly sourced lead identity; no UUID guessed');
+    return true;
   }
   transact(id, operation) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -165,7 +186,7 @@ export class Store {
         requestedAt: now(), state: 'waiting-for-reader', coverage: 'one-latest-turn-visible-text-on-native-stop' };
       this.event(b, previous && previous !== session ? 'session_binding_changed' : 'session_bound', 'Full UUID explicitly supplied; old execution sources retained separately');
     });
-    return correction.automaticHistory === true ? this.initializeHistory(board.id) : board;
+    return board.syncInitialization?.requested ? this.initializeHistory(board.id) : board;
   }
   observeRuntime(id, input) {
     return this.transact(id, b => {
@@ -222,12 +243,7 @@ export class Store {
       else { requireValue(b.members.length < 100, 'MEMBER_LIMIT', 'Maximum 100 members'); b.members.push(member); }
       // Initial association uses only an explicitly sourced lead UUID.
       // Visible-history collection still needs this board's separate consent.
-      if (memberId === 'lead' && !b.rootSessionId && input.nativeId && isThreadId(member.nativeId)
-          && ['host-env','public-thread-read','user-supplied'].includes(member.nativeIdentity?.source) && !b.archivedAt) {
-        b.rootSessionId = member.nativeId;
-        if (b.syncInitialization?.requested) b.syncInitialization.state = 'waiting-for-reader';
-        this.event(b, 'session_bound', 'Initial binding from the explicitly sourced lead identity; no UUID guessed');
-      }
+      if (memberId === 'lead' && input.nativeId) this.bindIdentifiedLead(b);
       this.event(b, 'member_report', `${member.name}: ${member.status}`);
     });
     return input.memberId === 'lead' ? this.initializeHistory(board.id) : board;

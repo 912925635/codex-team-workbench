@@ -1,6 +1,8 @@
 # Validation
 
-The current source is 0.5.6. Its complete isolated Node 24 Linux suite has 145
+The 0.5.7 Windows run passed 153 tests and skipped two Linux-only tests. It covers persistent sync consent, session binding and card reopening.
+
+The 0.5.6 isolated Node 24 Linux suite had 145
 tests: 143 pass, two Windows-only checks skip, and zero fail. Release validation
 uses standard bundled-Hook manifests. Windows-only Hook-launch checks are
 skipped on Linux; these are not claimed as Windows acceptance. UI checks cover
